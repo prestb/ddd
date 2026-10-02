@@ -1,0 +1,60 @@
+import type { LocalizedDevotion } from './localized-content';
+
+export const FRENCH_JULY_SAMPLE: Record<number, Partial<LocalizedDevotion>> = {
+  1: {
+    weekday: { en: 'Wondersday 1st', fr: 'Jour des merveilles 1er' },
+    title: { en: 'The Blessing Before The Command', fr: 'La bénédiction avant le commandement' },
+    preview: { en: 'One of the greatest revelations in scripture is that God blessed man before He gave him an assignment.', fr: 'L’une des grandes révélations de l’Écriture est que Dieu a béni l’homme avant de lui confier une mission.' },
+    meditation: { en: '', fr: 'L’une des grandes révélations de l’Écriture est que Dieu a béni l’homme avant de lui confier une mission. La première chose qu’Adam a reçue n’était ni le travail, ni la responsabilité, ni l’autorité, mais la bénédiction. Cette bénédiction était la capacité venue du ciel pour accomplir toute mission divine.\n\nLorsque tu comprends que tu es déjà béni en Christ, tu cesses de chercher à mériter l’acceptation et tu commences à manifester le plan originel de Dieu. Que chacune de tes décisions, de tes prières et de tes actions découle de la certitude que le ciel a déjà parlé favorablement sur ta vie.' },
+    wisdom: { en: '', fr: 'La bénédiction de Dieu est la puissance divine qui rend ses commandements possibles.' },
+    declaration: { en: '', fr: 'Je suis béni par Dieu et rendu capable de porter du fruit. Je multiplie en grâce, en sagesse, en influence et en ressources par Jésus-Christ. Amen !' },
+  },
+  2: {
+    weekday: { en: 'Triumphday 2nd', fr: 'Jour du triomphe 2e' },
+    title: { en: 'The Mystery Of Fruitfulness', fr: 'Le mystère de la fécondité' },
+    preview: { en: 'Fruitfulness is the visible evidence that divine life is actively flowing through a believer.', fr: 'La fécondité est la preuve visible que la vie divine agit dans le croyant.' },
+    meditation: { en: '', fr: 'La fécondité est la première attente que Dieu a placée sur l’humanité. Elle est plus que l’activité ou l’abondance : c’est la capacité de produire constamment des résultats qui glorifient Dieu. Le croyant fécond grandit en sagesse, en amour, en caractère, en service et en influence spirituelle.\n\nExamine ta vie aujourd’hui. Ta vie de prière porte-t-elle du fruit ? Ta famille, ton travail ou ton appel produisent-ils des résultats qui honorent Dieu ? Celui qui demeure attaché à Christ ne peut rester stérile. Demeure enraciné dans sa présence et laisse le Saint-Esprit agir en toi.' },
+    wisdom: { en: '', fr: 'Dieu mesure ta vie par sa fécondité, et non par ton agitation.' },
+    declaration: { en: '', fr: 'Je refuse toute forme de stérilité. Partout où je vais, je produis des résultats durables qui glorifient Dieu, au nom de Jésus.' },
+  },
+  3: {
+    weekday: { en: 'Faithday 3rd', fr: 'Jour de foi 3e' },
+    title: { en: 'The Law Of Multiplication', fr: 'La loi de la multiplication' },
+    preview: { en: 'God multiplies what is faithfully surrendered to Him.', fr: 'Dieu multiplie ce qui lui est fidèlement consacré.' },
+    meditation: { en: '', fr: 'Dieu n’a jamais voulu que ses bénédictions restent au niveau de l’addition. Le Royaume fonctionne selon la multiplication. Une seule semence produit une récolte, un disciple en forme plusieurs et une grâce reçue peut bénir toute une génération.\n\nNe méprise jamais ce que Dieu a déjà placé entre tes mains. Le petit don, la petite occasion et le commencement humble sont des matières premières pour la multiplication divine. La fidélité attire l’accroissement, la reconnaissance le préserve et l’obéissance l’accélère.' },
+    wisdom: { en: '', fr: 'Dieu multiplie ce qui lui est fidèlement consacré.' },
+    declaration: { en: '', fr: 'La grâce de la multiplication repose sur ma vie. Tout ce que Dieu a planté en moi augmente au-delà des attentes humaines, au nom de Jésus.' },
+  },
+  4: {
+    weekday: { en: 'Sabbathday 4th', fr: 'Jour du sabbat 4e' },
+    title: { en: 'Replenish The Wasted Places', fr: 'Restaurer les lieux dévastés' },
+    preview: { en: 'Our God is the restorer of broken destinies, wasted years, and forgotten dreams.', fr: 'Notre Dieu restaure les destinées brisées, les années perdues et les rêves oubliés.' },
+    meditation: { en: '', fr: 'Reconstituer signifie remplir à nouveau, restaurer et ramener à la plénitude ce qui était devenu vide. Dans toute l’Écriture, Dieu se révèle comme celui qui restaure les destinées brisées, les années perdues, les espoirs détruits et les rêves oubliés.\n\nLe Dieu qui a ordonné la restauration ne t’a pas oublié. Élève ta voix et invoque le Dieu de la restauration. Toute saison abandonnée entre ses mains peut devenir un témoignage.' },
+    wisdom: { en: '', fr: 'La restauration de Dieu n’est pas un simple remplacement ; c’est une compensation divine.' },
+    declaration: { en: '', fr: 'Toute saison perdue est restaurée. Le Seigneur renouvelle ma force, ma joie, ma paix, mes relations et mon appel. Gloire à Dieu !' },
+  },
+  5: {
+    weekday: { en: 'Sacredday 5th', fr: 'Jour sacré 5e' },
+    title: { en: 'The Mandate to Subdue', fr: 'Le mandat de soumettre' },
+    preview: { en: 'Every divine assignment carries sufficient grace to overcome resistance.', fr: 'Toute mission divine porte en elle la grâce nécessaire pour vaincre la résistance.' },
+    meditation: { en: '', fr: 'Soumettre signifie vaincre la résistance et établir l’ordre divin là où règne le chaos. Il ne s’agit pas de dominer les personnes, mais de surmonter toute force qui cherche à empêcher le dessein de Dieu.\n\nNe cède jamais le territoire que Dieu t’a confié. Chaque difficulté est une occasion de manifester la victoire déjà acquise en Christ. Marche dans l’obéissance et exerce l’autorité que Dieu t’a donnée.' },
+    wisdom: { en: '', fr: 'Toute mission divine porte en elle la grâce nécessaire pour vaincre toute opposition.' },
+    declaration: { en: '', fr: 'Par l’autorité de Jésus-Christ, toute opposition s’incline devant moi. Je marche dans la victoire totale et j’établis le Royaume de Dieu partout où il m’envoie.' },
+  },
+  6: {
+    weekday: { en: 'Mercyday 6th', fr: 'Jour de miséricorde 6e' },
+    title: { en: 'The Life of Dominion', fr: 'La vie de domination' },
+    preview: { en: 'True dominion begins with self-government under the government of God.', fr: 'La véritable domination commence par la maîtrise de soi sous le gouvernement de Dieu.' },
+    meditation: { en: '', fr: 'La domination n’est pas l’oppression ; c’est une gestion juste sous l’autorité de Dieu. Elle consiste à gouverner les circonstances sans être gouverné par elles. La domination commence à l’intérieur avant de se manifester à l’extérieur.\n\nLaisse le Saint-Esprit établir son gouvernement dans ton cœur, et son autorité se répandra naturellement dans ta vie. Tu n’as pas été racheté seulement pour échapper à l’enfer, mais pour représenter le ciel sur la terre.' },
+    wisdom: { en: '', fr: 'La véritable domination commence par la maîtrise de soi sous le gouvernement de Dieu.' },
+    declaration: { en: '', fr: 'Je marche dans la domination de Christ. Le péché ne me gouverne pas et la peur ne me maîtrise pas. Je règne sur les circonstances par l’autorité de Jésus-Christ. Amen !' },
+  },
+  7: {
+    weekday: { en: 'Truthday 7th', fr: 'Jour de vérité 7e' },
+    title: { en: 'Abide to Abound', fr: 'Demeurer pour porter du fruit' },
+    preview: { en: 'Public victories are born from private encounters with God.', fr: 'Les victoires publiques naissent des rencontres privées avec Dieu.' },
+    meditation: { en: '', fr: 'La branche n’a qu’une responsabilité : demeurer attachée au cep. Elle ne lutte pas pour produire du fruit ; elle demeure, et le fruit devient le résultat naturel de cette relation.\n\nSi tu désires des résultats inhabituels, approfondis ta communion avec Dieu. La prière, la méditation de la Parole, l’adoration et l’obéissance sont les canaux par lesquels la vie de Christ coule continuellement en toi.' },
+    wisdom: { en: '', fr: 'Le lieu secret est le berceau de la fécondité publique.' },
+    declaration: { en: '', fr: 'Je demeure continuellement en Christ. Sa vie coule en moi et je porte un fruit durable. Ma vie déborde de la présence de Dieu. Alléluia !' },
+  },
+};
