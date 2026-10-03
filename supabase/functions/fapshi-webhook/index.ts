@@ -9,7 +9,7 @@ Deno.serve(async (request) => {
     const secret = Deno.env.get('FAPSHI_WEBHOOK_SECRET');
     if (secret && request.headers.get('x-wh-secret') !== secret) return new Response('Unauthorized', { status: 401, headers: cors });
     const payload = await request.json();
-    const statusMap = { SUCCESSFUL: 'successful', FAILED: 'failed', EXPIRED: 'cancelled' };
+    const statusMap = { SUCCESSFUL: 'successful', SUCCESS: 'successful', FAILED: 'failed', EXPIRED: 'failed', CANCELLED: 'failed' };
     const status = statusMap[payload?.status];
     if (!status || !payload?.transId) return new Response(JSON.stringify({ received: true }), { headers: { ...cors, 'Content-Type': 'application/json' } });
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);

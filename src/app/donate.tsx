@@ -12,6 +12,7 @@ import { supabase } from '@/lib/supabase';
 
 const presetAmounts = ['1000', '2500', '5000', '10000'];
 type MobileMoneyProvider = 'mtn' | 'orange';
+type DonationStep = 'form' | 'pending' | 'success' | 'failed';
 
 export default function DonateScreen() {
   const { language, themeMode } = useSettings();
@@ -19,7 +20,9 @@ export default function DonateScreen() {
   const [phone, setPhone] = useState('');
   const [provider, setProvider] = useState<MobileMoneyProvider>('mtn');
   const [isLoading, setIsLoading] = useState(false);
+  const [step, setStep] = useState<DonationStep>('form');
   const [transId, setTransId] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const isDark = themeMode === 'dark';
 
   const continueToPayment = async () => {
@@ -39,6 +42,7 @@ export default function DonateScreen() {
     }
 
     setIsLoading(true);
+    setErrorMessage(null);
     try {
       const { data, error } = await supabase.functions.invoke('create-donation', {
         body: { amount: numericAmount, phone: phone.trim(), provider },
@@ -57,11 +61,59 @@ export default function DonateScreen() {
       }
 
       setTransId(data.transId);
+      setStep('pending');
     } catch (err) {
       Alert.alert(t(language, 'donate'), err instanceof Error ? err.message : t(language, 'donationUnavailable'));
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleVerifyDonationStatus = async () => {
+    if (!transId || !supabase) return;
+    setIsLoading(true);
+    setErrorMessage(null);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('check-donation-status', {
+        body: { transId },
+      });
+
+      if (error || !data?.status) {
+        setErrorMessage(
+          language === 'fr'
+            ? "Nous n'avons pas pu vérifier le statut du don pour le moment. Veuillez réessayer."
+            : "We couldn't verify the donation status right now. Please try again."
+        );
+        return;
+      }
+
+      if (data.status === 'successful') {
+        setStep('success');
+      } else if (data.status === 'failed') {
+        setStep('failed');
+      } else {
+        setErrorMessage(
+          language === 'fr'
+            ? 'Demande de don en cours. Saisissez votre code secret USSD sur votre téléphone pour valider.'
+            : 'Donation request pending. Please check your phone for the USSD prompt and enter your PIN.'
+        );
+      }
+    } catch {
+      setErrorMessage(
+        language === 'fr'
+          ? "Nous n'avons pas pu vérifier le statut du don pour le moment. Veuillez réessayer."
+          : "We couldn't verify the donation status right now. Please try again."
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const resetForm = () => {
+    setTransId(null);
+    setStep('form');
+    setErrorMessage(null);
   };
 
   return (
@@ -78,25 +130,8 @@ export default function DonateScreen() {
           <Text style={[styles.title, isDark && styles.darkInk]}>{t(language, 'supportMinistry')}</Text>
           <Text style={[styles.subtitle, isDark && styles.darkBody]}>{t(language, 'donationIntro')}</Text>
 
-          {transId ? (
-            <View style={[styles.card, isDark && styles.darkCard, { alignItems: 'center', padding: 22 }]}>
-              <AppIcon name="checkmark.circle.fill" size={44} tintColor={DewDesign.colors.forest} />
-              <Text style={[styles.pendingTitle, isDark && styles.darkInk]}>
-                {language === 'fr' ? 'Demande de don envoyée !' : 'Donation Request Sent!'}
-              </Text>
-              <Text style={[styles.pendingBody, isDark && styles.darkBody]}>
-                {language === 'fr'
-                  ? 'Veuillez consulter votre téléphone et composer votre code secret USSD pour valider votre don.'
-                  : 'Please check your mobile phone for the USSD prompt from your Mobile Money provider and enter your PIN to authorize.'}
-              </Text>
-              <Text style={styles.transRef}>
-                {`${language === 'fr' ? 'Référence' : 'Reference'}: ${transId}`}
-              </Text>
-              <Pressable onPress={() => setTransId(null)} style={[styles.primary, { width: '100%', marginTop: 18 }]}>
-                <Text style={styles.primaryText}>{language === 'fr' ? 'Nouveau don' : 'Make Another Donation'}</Text>
-              </Pressable>
-            </View>
-          ) : (
+          {/* STEP 1: FORM */}
+          {step === 'form' && (
             <View style={[styles.card, isDark && styles.darkCard]}>
               <Text style={[styles.label, isDark && styles.darkInk]}>{t(language, 'donationAmount')} (XAF)</Text>
               <View style={styles.presets}>
@@ -146,6 +181,81 @@ export default function DonateScreen() {
               <Text style={[styles.note, isDark && styles.darkBody]}>{t(language, 'donationNote')}</Text>
             </View>
           )}
+
+          {/* STEP 2: PENDING USSD PROMPT */}
+          {step === 'pending' && (
+            <View style={[styles.card, isDark && styles.darkCard, { alignItems: 'center', padding: 22 }]}>
+              <AppIcon name="clock.fill" size={44} tintColor={DewDesign.colors.terracotta} />
+              <Text style={[styles.pendingTitle, isDark && styles.darkInk]}>
+                {language === 'fr' ? 'Demande de don envoyée !' : 'Donation Request Sent!'}
+              </Text>
+              <Text style={[styles.pendingBody, isDark && styles.darkBody]}>
+                {language === 'fr'
+                  ? 'Veuillez consulter votre téléphone et composer votre code secret USSD pour valider votre don.'
+                  : 'Please check your mobile phone for the USSD prompt from your Mobile Money provider and enter your PIN to authorize.'}
+              </Text>
+              {transId ? (
+                <Text style={styles.transRef}>
+                  {`${language === 'fr' ? 'Référence' : 'Reference'}: ${transId}`}
+                </Text>
+              ) : null}
+
+              {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+
+              <Pressable disabled={isLoading} onPress={handleVerifyDonationStatus} style={[styles.primary, { width: '100%', marginTop: 18 }, isLoading && styles.primaryDisabled]}>
+                <AppIcon name="arrow.clockwise" size={17} tintColor="#FFFFFF" />
+                <Text style={styles.primaryText}>
+                  {isLoading ? (language === 'fr' ? 'Vérification...' : 'Checking...') : (language === 'fr' ? 'Vérifier le statut' : 'Check Donation Status')}
+                </Text>
+              </Pressable>
+            </View>
+          )}
+
+          {/* STEP 3: VERIFIED THANK YOU NOTICE */}
+          {step === 'success' && (
+            <View style={[styles.card, isDark && styles.darkCard, { alignItems: 'center', padding: 24 }]}>
+              <View style={styles.successIconBadge}>
+                <AppIcon name="heart.fill" size={32} tintColor="#FFFFFF" />
+              </View>
+              <Text style={[styles.thankYouHeading, isDark && styles.darkInk]}>
+                {language === 'fr' ? 'Merci pour votre généreux soutien.' : 'Thank you for your generous support.'}
+              </Text>
+              <Text style={[styles.thankYouBody, isDark && styles.darkBody]}>
+                {language === 'fr'
+                  ? `Votre don de ${Number(amount).toLocaleString()} XAF a été reçu avec succès. Votre générosité contribue au soutien du ministère Daily Dew.`
+                  : `Your donation of ${Number(amount).toLocaleString()} XAF has been received successfully. Your generosity helps support the Daily Dew ministry.`}
+              </Text>
+              {transId ? (
+                <Text style={styles.transRef}>
+                  {`${language === 'fr' ? 'Référence' : 'Reference'}: ${transId}`}
+                </Text>
+              ) : null}
+
+              <Pressable onPress={resetForm} style={[styles.primary, { width: '100%', marginTop: 22 }]}>
+                <Text style={styles.primaryText}>
+                  {language === 'fr' ? 'Faire un autre don' : 'Make Another Donation'}
+                </Text>
+              </Pressable>
+            </View>
+          )}
+
+          {/* STEP 4: FAILED */}
+          {step === 'failed' && (
+            <View style={[styles.card, isDark && styles.darkCard, { alignItems: 'center', padding: 22 }]}>
+              <AppIcon name="xmark.circle.fill" size={44} tintColor={DewDesign.colors.terracotta} />
+              <Text style={[styles.pendingTitle, isDark && styles.darkInk]}>
+                {language === 'fr' ? 'Don non validé' : 'Donation Unsuccessful'}
+              </Text>
+              <Text style={[styles.pendingBody, isDark && styles.darkBody]}>
+                {language === 'fr'
+                  ? 'Le paiement a été annulé ou a échoué. Aucun fonds n’a été prélevé.'
+                  : 'The payment was cancelled or failed. No funds were deducted from your Mobile Money account.'}
+              </Text>
+              <Pressable onPress={resetForm} style={[styles.primary, { width: '100%', marginTop: 18 }]}>
+                <Text style={styles.primaryText}>{language === 'fr' ? 'Réessayer' : 'Try Again'}</Text>
+              </Pressable>
+            </View>
+          )}
         </ScrollView>
         <AppBottomNav />
       </SafeAreaView>
@@ -185,6 +295,10 @@ const styles = StyleSheet.create({
   pendingTitle: { fontSize: 20, fontWeight: '800', marginTop: 12, textAlign: 'center' },
   pendingBody: { fontSize: 13, lineHeight: 20, textAlign: 'center', marginTop: 8 },
   transRef: { fontSize: 12, fontWeight: '700', color: DewDesign.colors.terracotta, marginTop: 12 },
+  thankYouHeading: { fontSize: 22, fontWeight: '800', fontFamily: 'serif', color: DewDesign.colors.ink, textAlign: 'center', marginTop: 14 },
+  thankYouBody: { fontSize: 14, lineHeight: 22, color: DewDesign.colors.body, textAlign: 'center', marginTop: 10 },
+  successIconBadge: { width: 60, height: 60, borderRadius: 30, backgroundColor: DewDesign.colors.forest, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
+  errorText: { color: DewDesign.colors.terracotta, fontSize: 12, fontWeight: '700', marginTop: 10, textAlign: 'center' },
   darkInk: { color: '#F5F1E9' },
   darkBody: { color: '#C6D0C8' },
 });

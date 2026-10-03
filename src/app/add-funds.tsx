@@ -59,11 +59,11 @@ export const walletFundingService = {
   },
 
   async verifyDepositStatus(transId: string): Promise<{
-    status: 'pending' | 'successful' | 'failed' | 'cancelled';
+    status: 'pending' | 'successful' | 'failed' | 'cancelled' | 'verification_error';
     amount?: number;
   }> {
     if (!supabase) {
-      return { status: 'pending' };
+      return { status: 'verification_error' };
     }
 
     try {
@@ -78,10 +78,10 @@ export const walletFundingService = {
         };
       }
     } catch {
-      // Fallback
+      // Verification error
     }
 
-    return { status: 'pending' };
+    return { status: 'verification_error' };
   },
 
   async getUserBalance(userId: string): Promise<number | null> {
@@ -175,6 +175,12 @@ export default function AddFundsScreen() {
         setStep('success');
       } else if (result.status === 'failed' || result.status === 'cancelled') {
         setStep('failed');
+      } else if (result.status === 'verification_error') {
+        setErrorMessage(
+          language === 'fr'
+            ? "Nous n'avons pas pu vérifier le statut du paiement pour le moment. Veuillez réessayer."
+            : "We couldn't verify the payment status right now. Please try again."
+        );
       } else {
         // Still pending
         setErrorMessage(
@@ -186,8 +192,8 @@ export default function AddFundsScreen() {
     } catch {
       setErrorMessage(
         language === 'fr'
-          ? 'Validation en cours. Veuillez réessayer dans quelques instants.'
-          : 'Status check pending. Please retry in a moment.'
+          ? "Nous n'avons pas pu vérifier le statut du paiement pour le moment. Veuillez réessayer."
+          : "We couldn't verify the payment status right now. Please try again."
       );
     } finally {
       setBusy(false);

@@ -21,13 +21,16 @@ Deno.serve(async (request) => {
     const apiKey = Deno.env.get('FAPSHI_API_KEY');
     const apiUser = Deno.env.get('FAPSHI_API_USER');
     const baseUrl = Deno.env.get('FAPSHI_BASE_URL') ?? 'https://sandbox.fapshi.com';
-    if (!apiKey || !apiUser) throw new Error('Fapshi is not configured on the server.');
+    if (!apiKey || !apiUser) {
+      console.error('check-wallet-deposit-status: Fapshi credentials missing in environment.');
+      return json({ error: 'SERVER_CONFIGURATION_ERROR', message: 'Server configuration error.' }, 500);
+    }
 
     const body = await request.json();
     const transId = typeof body?.transId === 'string' ? body.transId.trim() : '';
 
     if (!transId) {
-      return json({ error: 'Transaction ID is required to verify status.' }, 400);
+      return json({ error: 'MISSING_TRANS_ID', message: 'Transaction ID is required to verify status.' }, 400);
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -35,7 +38,7 @@ Deno.serve(async (request) => {
     const authHeader = request.headers.get('Authorization');
 
     if (!authHeader) {
-      return json({ error: 'Authentication required to check deposit status.' }, 401);
+      return json({ error: 'UNAUTHORIZED', message: 'Authentication required to check deposit status.' }, 401);
     }
 
     const authClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY')!, {
@@ -44,7 +47,7 @@ Deno.serve(async (request) => {
     const { data: { user }, error: authError } = await authClient.auth.getUser();
 
     if (authError || !user) {
-      return json({ error: 'Invalid or expired user session.' }, 401);
+      return json({ error: 'UNAUTHORIZED', message: 'Invalid or expired user session.' }, 401);
     }
 
     const admin = createClient(supabaseUrl, serviceKey);
@@ -57,8 +60,13 @@ Deno.serve(async (request) => {
       .eq('user_id', user.id)
       .maybeSingle();
 
-    if (selectError || !paymentTx) {
-      return json({ error: 'PAYMENT_NOT_FOUND', message: 'The payment transaction could not be found.' }, 404);
+    if (selectError) {
+      console.error('check-wallet-deposit-status: Database query error', selectError);
+      return json({ error: 'DATABASE_ERROR', message: 'Database query failed.' }, 500);
+    }
+
+    if (!paymentTx) {
+      return json({ error: 'PAYMENT_NOT_FOUND', message: 'The payment transaction could not be found for this user.' }, 404);
     }
 
     if (paymentTx.purpose !== 'wallet_deposit') {
@@ -82,6 +90,12 @@ Deno.serve(async (request) => {
       headers: { apiuser: apiUser, apikey: apiKey, 'Content-Type': 'application/json' },
     });
 
+    if (!fapshiRes.ok) {
+      const rawErrorText = await fapshiRes.text();
+      console.error(`check-wallet-deposit-status: Fapshi API returned HTTP ${fapshiRes.status} - ${rawErrorText}`);
+      return json({ error: 'PAYMENT_PROVIDER_STATUS_FAILED', message: 'Payment provider status check failed.' }, 502);
+    }
+
     const rawText = await fapshiRes.text();
     let fapshiData: any = {};
     try { fapshiData = rawText ? JSON.parse(rawText) : {}; } catch { fapshiData = { message: rawText }; }
@@ -98,8 +112,16 @@ Deno.serve(async (request) => {
       });
 
       if (rpcError) {
-        console.error('check-wallet-deposit-status: RPC failed', rpcError);
-        throw rpcError;
+        console.error('check-wallet-deposit-status: process_verified_wallet_deposit RPC failed', rpcError);
+        return json({ error: 'PAYMENT_FULFILLMENT_FAILED', message: 'Wallet deposit fulfillment failed.' }, 500);
+      }
+
+      if (processResult?.status === 'not_found') {
+        return json({ error: 'PAYMENT_NOT_FOUND', message: 'Provider transaction not found in internal ledger.' }, 404);
+      }
+
+      if (processResult?.status === 'amount_mismatch') {
+        return json({ error: 'AMOUNT_MISMATCH', message: 'Provider transaction amount mismatch.' }, 400);
       }
 
       return json({
@@ -132,7 +154,7 @@ Deno.serve(async (request) => {
       transId: targetTransId,
     });
   } catch (error) {
-    console.error('check-wallet-deposit-status failed', error);
-    return json({ error: error instanceof Error ? error.message : 'PAYMENT_VERIFICATION_FAILED' }, 400);
+    console.error('check-wallet-deposit-status unhandled exception', error);
+    return json({ error: 'INTERNAL_SERVER_ERROR', message: error instanceof Error ? error.message : 'Status check failed.' }, 500);
   }
 });
