@@ -3,8 +3,6 @@ import AppBottomNav from '@/components/app-bottom-nav';
 import DailyDewHeader from '@/components/daily-dew-header';
 import { DewDesign } from '@/constants/design';
 import { router } from 'expo-router';
-import * as WebBrowser from 'expo-web-browser';
-import * as Linking from 'expo-linking';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -32,7 +30,7 @@ export const walletFundingService = {
     phone: string;
     provider: MobileMoneyProvider;
     email: string;
-  }): Promise<{ link?: string; transId: string; externalId: string; amount?: number }> {
+  }): Promise<{ transId: string; externalReference: string; amount: number; phone: string }> {
     if (!supabase) {
       throw new Error('Supabase client is not configured.');
     }
@@ -53,10 +51,10 @@ export const walletFundingService = {
     }
 
     return {
-      link: data.link,
       transId: data.transId,
-      externalId: data.externalReference ?? data.externalId ?? `deposit-${Date.now()}`,
+      externalReference: data.externalReference ?? `deposit-${Date.now()}`,
       amount: data.amount ?? amount,
+      phone: data.phone ?? phone,
     };
   },
 
@@ -130,7 +128,8 @@ export default function AddFundsScreen() {
       setErrorMessage(language === 'fr' ? 'Saisissez un montant valide entre 100 et 10 000 000 XAF.' : 'Enter a valid amount between 100 and 10,000,000 XAF.');
       return;
     }
-    if (phone.trim().length < 9) {
+    const cleanPhone = phone.replace(/\D/g, '');
+    if (cleanPhone.length < 9) {
       setErrorMessage(language === 'fr' ? 'Saisissez un numéro Mobile Money valide (9 chiffres).' : 'Enter a valid 9-digit Mobile Money phone number.');
       return;
     }
@@ -152,11 +151,6 @@ export default function AddFundsScreen() {
 
       setTransId(deposit.transId);
       setStep('pending');
-
-      // Open hosted Fapshi checkout link via WebBrowser session
-      if (deposit.link) {
-        await WebBrowser.openAuthSessionAsync(deposit.link, Linking.createURL('membership'));
-      }
     } catch (err) {
       setErrorMessage(
         err instanceof Error ? err.message : (language === 'fr' ? 'Impossible de démarrer le paiement.' : 'Could not start payment.')
@@ -186,8 +180,8 @@ export default function AddFundsScreen() {
         // Still pending
         setErrorMessage(
           language === 'fr'
-            ? 'Demande de rechargement en cours. Validez le paiement sur la page Fapshi ou votre téléphone.'
-            : 'Deposit request pending. Complete the payment on the Fapshi page or your phone.'
+            ? 'Demande de rechargement envoyée ! Saisissez votre code secret USSD sur votre téléphone pour valider le paiement.'
+            : 'Payment request sent! Please check your mobile phone for the USSD prompt and enter your PIN to authorize.'
         );
       }
     } catch {

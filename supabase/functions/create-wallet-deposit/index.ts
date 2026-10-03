@@ -13,6 +13,20 @@ const json = (body: unknown, status = 200) =>
     headers: { ...cors, 'Content-Type': 'application/json' },
   });
 
+function normalizeCameroonPhone(input: string): string {
+  const digits = input.replace(/\D/g, '');
+  if (digits.length === 9 && digits.startsWith('6')) {
+    return digits;
+  }
+  if (digits.length === 12 && digits.startsWith('2376')) {
+    return digits.slice(3);
+  }
+  if (digits.length === 10 && digits.startsWith('06')) {
+    return digits.slice(1);
+  }
+  return digits;
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: cors });
   if (request.method !== 'POST') return json({ error: 'Only POST is supported.' }, 405);
@@ -29,8 +43,14 @@ Deno.serve(async (request) => {
       return json({ error: 'Funding amount must be a whole number between 100 and 10,000,000 XAF.' }, 400);
     }
 
-    const provider = body?.provider === 'orange' ? 'orange' : 'mtn';
-    const phone = typeof body?.phone === 'string' ? body.phone.trim() : '';
+    const rawPhone = typeof body?.phone === 'string' ? body.phone.trim() : '';
+    const normalizedPhone = normalizeCameroonPhone(rawPhone);
+    if (normalizedPhone.length !== 9 || !normalizedPhone.startsWith('6')) {
+      return json({ error: 'Enter a valid 9-digit Cameroon Mobile Money phone number starting with 6 (e.g., 670000000).' }, 400);
+    }
+
+    const providerChoice = body?.provider === 'orange' ? 'orange' : 'mtn';
+    const medium = providerChoice === 'orange' ? 'orange money' : 'mobile money';
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -50,9 +70,8 @@ Deno.serve(async (request) => {
     }
 
     const externalReference = `deposit-${crypto.randomUUID()}`;
-    const redirectUrl = Deno.env.get('WALLET_REDIRECT_URL') ?? 'https://ptsministry.com/app/membership';
 
-    // 1. Record pending payment_transactions row before provider request
+    // 1. Record pending payment_transactions row before provider Direct Pay request
     const admin = createClient(supabaseUrl, serviceKey);
     const { data: pendingTx, error: insertError } = await admin
       .from('payment_transactions')
@@ -65,8 +84,9 @@ Deno.serve(async (request) => {
         currency: 'XAF',
         status: 'pending',
         metadata: {
-          phone,
-          provider_method: provider,
+          phone: normalizedPhone,
+          provider_method: providerChoice,
+          medium,
           email: user.email,
         },
       })
@@ -78,16 +98,17 @@ Deno.serve(async (request) => {
       throw new Error('Could not record payment transaction.');
     }
 
-    // 2. Initiate Fapshi Mobile Money request
-    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/initiate-pay`, {
+    // 2. Initiate Fapshi Direct Pay request
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/direct-pay`, {
       method: 'POST',
       headers: { apiuser: apiUser, apikey: apiKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         amount,
+        phone: normalizedPhone,
+        medium,
         ...(user.email ? { email: user.email } : {}),
         userId: user.id,
         externalId: externalReference,
-        redirectUrl,
         message: 'Daily Dew Account Balance Deposit',
       }),
     });
@@ -98,7 +119,7 @@ Deno.serve(async (request) => {
 
     if (!response.ok || !result?.transId) {
       const providerMessage = result?.message || rawResponse || 'No response body was returned by Fapshi.';
-      console.error(`Fapshi deposit initiation failed: HTTP ${response.status} - ${providerMessage}`);
+      console.error(`Fapshi Direct Pay deposit failed: HTTP ${response.status} - ${providerMessage}`);
 
       await admin
         .from('payment_transactions')
@@ -114,19 +135,22 @@ Deno.serve(async (request) => {
       .update({
         provider_transaction_id: result.transId,
         metadata: {
-          phone,
-          provider_method: provider,
+          phone: normalizedPhone,
+          provider_method: providerChoice,
+          medium,
           email: user.email,
-          fapshi_link: result.link,
+          direct_pay_response: result,
         },
       })
       .eq('id', pendingTx.id);
 
     return json({
-      link: result.link,
+      success: true,
       transId: result.transId,
       externalReference,
       amount,
+      phone: normalizedPhone,
+      medium,
     });
   } catch (error) {
     console.error('create-wallet-deposit failed', error);
