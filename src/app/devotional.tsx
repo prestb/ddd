@@ -31,13 +31,45 @@ export default function DevotionalScreen() {
   const isBookmarked = bookmarks.includes(index);
   const reflection = reflections[index] ?? '';
   const prayer = prayers[index] ?? '';
-  const meditationParagraphs = devotion.meditation.split(/\n\s*\n|\n(?=[A-Z][^a-z]{0,2}\s)/).map((paragraph) => paragraph.trim()).filter(Boolean);
+
   const hasPrevious = index > 0;
   const hasNext = index < devotions.length - 1;
 
   const goToDay = (nextIndex: number) => {
     router.replace({ pathname: '/devotional', params: { day: String(nextIndex) } });
   };
+
+  if (!hydrated) {
+    return (
+      <View style={[styles.screen, isDark && styles.darkScreen]}>
+        <SafeAreaView style={[styles.loadingState, isDark && styles.darkScreen]}>
+          <SymbolView name="book.closed" size={26} tintColor={DewDesign.colors.forest} />
+          <Text style={styles.loadingTitle}>{t(language, 'openingJourney')}</Text>
+          <Text style={styles.loadingText}>{t(language, 'restoringNotes')}</Text>
+        </SafeAreaView>
+      </View>
+    );
+  }
+
+  if (!devotion) {
+    return (
+      <View style={[styles.screen, isDark && styles.darkScreen]}>
+        <SafeAreaView style={[styles.safeArea, isDark && styles.darkScreen]}>
+          <DailyDewHeader />
+          <View style={[styles.loadingState, isDark && styles.darkScreen]}>
+            <SymbolView name="book.closed" size={28} tintColor={DewDesign.colors.terracotta} />
+            <Text style={[styles.loadingTitle, isDark && styles.darkInk]}>{t(language, 'noMeditationTodayTitle')}</Text>
+            <Text style={[styles.loadingText, isDark && styles.darkMuted]}>{t(language, 'noMeditationTodayMsg')}</Text>
+            <Pressable onPress={() => router.back()} style={styles.explorePremiumBtn}>
+              <Text style={styles.explorePremiumText}>{t(language, 'goBack')}</Text>
+            </Pressable>
+          </View>
+        </SafeAreaView>
+      </View>
+    );
+  }
+
+  const meditationParagraphs = devotion.meditation.split(/\n\s*\n|\n(?=[A-Z][^a-z]{0,2}\s)/).map((paragraph) => paragraph.trim()).filter(Boolean);
 
   const shareMoment = async () => {
     const appDownloadLink = process.env.EXPO_PUBLIC_APP_DOWNLOAD_URL ?? 'Download link coming soon';
@@ -54,18 +86,6 @@ export default function DevotionalScreen() {
       message,
     });
   };
-
-  if (!hydrated) {
-    return (
-      <View style={[styles.screen, isDark && styles.darkScreen]}>
-        <SafeAreaView style={[styles.loadingState, isDark && styles.darkScreen]}>
-          <SymbolView name="book.closed" size={26} tintColor={DewDesign.colors.forest} />
-          <Text style={styles.loadingTitle}>{t(language, 'openingJourney')}</Text>
-          <Text style={styles.loadingText}>{t(language, 'restoringNotes')}</Text>
-        </SafeAreaView>
-      </View>
-    );
-  }
 
   // Day-Level & Edition-Level Premium Locked Guard
   const isLocked = Boolean(devotion?.isLocked || edition?.isLocked);

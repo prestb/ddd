@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDevotional } from '@/context/devotional-context';
-import { localizeDevotion } from '@/data/devotions';
+import { localizeDevotion, type Devotion } from '@/data/devotions';
 import { useSettings } from '@/context/settings-context';
 import { useContent } from '@/context/content-context';
 import { DewDesign } from '@/constants/design';
@@ -23,7 +23,7 @@ export default function LibraryScreen() {
   const { devotions: cloudDevotions, edition, loading: contentLoading, error: contentError, refresh: refreshContent } = useContent();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<LibraryFilter>('all');
-  const dailyDevotions = cloudDevotions.map((devotion, index) => localizeDevotion(devotion, index, language));
+  const dailyDevotions = cloudDevotions.map((devotion, index) => localizeDevotion(devotion, index, language)).filter((d): d is Devotion => d !== null);
   const visibleDevotions = useMemo(() => dailyDevotions
     .map((devotion, index) => ({ devotion, index }))
     .filter(({ devotion, index }) => {

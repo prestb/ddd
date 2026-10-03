@@ -174,6 +174,7 @@ export default function JourneyScreen() {
                 const devotion = devotions[day];
                 if (!devotion) return null;
                 const localized = localizeDevotion(devotion, day, language);
+                if (!localized) return null;
                 const note = savedFilter === 'reflections' ? reflections[day] : savedFilter === 'prayers' ? prayers[day] : null;
                 const answered = answeredPrayers.includes(day);
                 return (

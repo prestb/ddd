@@ -16,25 +16,13 @@ export type Devotion = {
 
 export const DAILY_DEVOTIONS = SHILOH_JULY_2026;
 
-const FALLBACK_DEVOTION: Devotion = SHILOH_JULY_2026[0] ?? {
-  day: 1,
-  weekday: 'Day 1',
-  title: 'Daily Meditation',
-  scripture: 'Psalm 119:105',
-  preview: 'Your word is a lamp to my feet and a light to my path.',
-  meditation: 'Your word is a lamp to my feet and a light to my path.',
-  furtherStudies: ['Psalm 119:105'],
-  wisdom: 'Thy word is a lamp unto my feet.',
-  declaration: "God's word guides my steps every day.",
-};
-
-export function localizeDevotion(base: Devotion | null | undefined, index: number, language: SupportedLanguage): Devotion {
-  const safeBase = base ?? DAILY_DEVOTIONS[index] ?? DAILY_DEVOTIONS[0] ?? FALLBACK_DEVOTION;
+export function localizeDevotion(base: Devotion | null | undefined, _index: number, _language: SupportedLanguage): Devotion | null {
+  if (!base) return null;
 
   // Security Guard: If devotion is locked, preserve empty protected fields
-  if (safeBase.isLocked) {
+  if (base.isLocked) {
     return {
-      ...safeBase,
+      ...base,
       preview: '',
       meditation: '',
       wisdom: '',
@@ -44,13 +32,13 @@ export function localizeDevotion(base: Devotion | null | undefined, index: numbe
     };
   }
 
-  return safeBase;
+  return base;
 }
 
-export function getLocalizedDevotion(index: number, language: SupportedLanguage): Devotion {
+export function getLocalizedDevotion(index: number, language: SupportedLanguage): Devotion | null {
   return localizeDevotion(DAILY_DEVOTIONS[index], index, language);
 }
 
-export function getLocalizedDevotions(language: SupportedLanguage) {
-  return DAILY_DEVOTIONS.map((_, index) => getLocalizedDevotion(index, language));
+export function getLocalizedDevotions(language: SupportedLanguage): Devotion[] {
+  return DAILY_DEVOTIONS.map((d, index) => localizeDevotion(d, index, language)).filter(Boolean) as Devotion[];
 }
