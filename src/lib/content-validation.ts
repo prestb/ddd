@@ -10,7 +10,11 @@ export function validateDevotions(rows: Devotion[]): { valid: Devotion[]; invali
   const seen = new Set<number>();
   const invalidDays: number[] = [];
   const valid = rows.filter((row) => {
-    const invalid = !Number.isInteger(row.day) || row.day < 1 || row.day > 31 || seen.has(row.day) || !row.title?.trim() || !row.scripture?.trim() || !row.meditation?.trim();
+    const isLocked = Boolean(row.isLocked);
+    const basicInvalid = !Number.isInteger(row.day) || row.day < 1 || row.day > 31 || seen.has(row.day) || !row.title?.trim() || !row.scripture?.trim();
+    const contentInvalid = !isLocked && !row.meditation?.trim();
+    const invalid = basicInvalid || contentInvalid;
+
     if (invalid) invalidDays.push(row.day);
     seen.add(row.day);
     return !invalid;

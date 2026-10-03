@@ -51,24 +51,35 @@ export function ContentProvider({ children }: PropsWithChildren) {
           const parsed = JSON.parse(cachedRaw);
           if (parsed?.edition && Array.isArray(parsed?.devotions) && parsed.devotions.length > 0) {
             const isPremiumEdition = parsed.edition.access_level === 'premium';
+            const cachedEntitlement = parsed?.cachedUserEntitlement ?? 'free';
             const currentUserId = session?.user?.id ?? null;
             const cachedUserId = parsed?.cachedUserId ?? null;
             const isOwnerMatch = Boolean(currentUserId && cachedUserId && currentUserId === cachedUserId);
 
-            // ACCOUNT ISOLATION GUARD:
-            // If cached edition is premium AND (user is signed out OR active session user ID does NOT match cached user ID)
-            if (isPremiumEdition && (!session || !isOwnerMatch)) {
-              setEdition({ ...parsed.edition, isLocked: true });
+            // ENTITLEMENT & ACCOUNT ISOLATION GUARD:
+            // If cached edition was fetched as Premium AND (session is signed out OR user ID mismatch)
+            const needsSanitization = cachedEntitlement === 'premium' && (!session || !isOwnerMatch);
+
+            if (isPremiumEdition || needsSanitization) {
+              setEdition({
+                ...parsed.edition,
+                isLocked: isPremiumEdition || needsSanitization,
+              });
               setDevotions(
-                parsed.devotions.map((d: Devotion) => ({
-                  ...d,
-                  meditation: '',
-                  preview: '',
-                  wisdom: '',
-                  declaration: '',
-                  furtherStudies: [],
-                  isLocked: true,
-                }))
+                parsed.devotions.map((d: Devotion) => {
+                  const shouldLock = d.day > 3 || isPremiumEdition || needsSanitization;
+                  return shouldLock
+                    ? {
+                        ...d,
+                        meditation: '',
+                        preview: '',
+                        wisdom: '',
+                        declaration: '',
+                        furtherStudies: [],
+                        isLocked: true,
+                      }
+                    : d;
+                })
               );
             } else {
               setEdition(parsed.edition);
@@ -136,10 +147,12 @@ export function ContentProvider({ children }: PropsWithChildren) {
             setSource('cloud');
             setError(null);
 
+            const hasFullPremiumAccess = checked.valid.every((d) => !d.isLocked);
             const cachePayload = JSON.stringify({
               edition: fetchedEdition,
               devotions: checked.valid,
               cachedUserId: session?.user?.id ?? null,
+              cachedUserEntitlement: hasFullPremiumAccess ? 'premium' : 'free',
             });
 
             AsyncStorage.multiSet([
