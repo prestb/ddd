@@ -43,56 +43,80 @@ Deno.serve(async (request) => {
       return json({ error: 'FORBIDDEN', message: 'Only Ministry Administrators can access financial ledgers.' }, 403);
     }
 
-    // Query financial ledgers across all accounting tables
-    const [
-      { data: paymentTxs },
-      { data: walletTxs },
-      { data: subscriptionTxs },
-      { data: donations },
-      { data: activeSubscriptions },
-      { data: walletBalances },
-      { data: subscriptionPlans },
-    ] = await Promise.all([
-      admin.from('payment_transactions').select('id, user_id, purpose, amount, currency, status, provider, provider_transaction_id, external_reference, created_at, metadata').order('created_at', { ascending: false }).limit(50),
-      admin.from('wallet_transactions').select('id, wallet_id, user_id, type, amount, balance_before, balance_after, reference, description, created_at, metadata').order('created_at', { ascending: false }).limit(50),
-      admin.from('subscription_transactions').select('id, subscription_id, user_id, plan_id, type, amount, currency, wallet_transaction_id, created_at, metadata').order('created_at', { ascending: false }).limit(50),
-      admin.from('donations').select('id, user_id, amount, status, transaction_id, external_id, created_at, metadata').order('created_at', { ascending: false }).limit(50),
-      admin.from('subscriptions').select('id, user_id, plan_id, status, started_at, expires_at, auto_renew').eq('status', 'active'),
-      admin.from('wallets').select('user_id, balance, updated_at'),
-      admin.from('subscription_plans').select('id, name, duration_days, price_xaf, is_active'),
-    ]);
+    const body = await request.json().catch(() => ({}));
+    const requestedLedger = ['payments', 'wallet', 'subscriptions', 'donations'].includes(body?.ledger) ? body.ledger : 'payments';
+    const page = Math.max(1, Number(body?.page) || 1);
+    const pageSize = Math.min(50, Math.max(5, Number(body?.pageSize) || 25));
 
-    const totalSuccessfulDepositXaf = (paymentTxs ?? [])
-      .filter((tx) => tx.status === 'successful' && tx.purpose === 'wallet_deposit')
-      .reduce((acc, tx) => acc + (tx.amount || 0), 0);
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
 
-    const totalDonationsXaf = (donations ?? [])
-      .filter((d) => d.status === 'successful')
-      .reduce((acc, d) => acc + (d.amount || 0), 0);
+    // 1. Get complete summary metrics across all tables via RPC
+    const { data: summaryResult, error: summaryError } = await admin.rpc('get_admin_financial_summary');
 
-    const totalSubscriptionRevenueXaf = (subscriptionTxs ?? [])
-      .reduce((acc, stx) => acc + (stx.amount || 0), 0);
+    let summary = summaryResult;
+    if (summaryError || !summary) {
+      console.warn('admin-financials: RPC get_admin_financial_summary unavailable, using fallback query', summaryError);
+      summary = {
+        totalSuccessfulDepositXaf: 0,
+        totalDonationsXaf: 0,
+        totalSubscriptionRevenueXaf: 0,
+        activeSubscribersCount: 0,
+        totalWalletBalanceXaf: 0,
+        countPayments: 0,
+        countWalletTxs: 0,
+        countSubTxs: 0,
+        countDonations: 0,
+      };
+    }
 
-    const activeSubscribersCount = (activeSubscriptions ?? []).length;
-    const totalWalletBalanceXaf = (walletBalances ?? []).reduce((acc, w) => acc + (w.balance || 0), 0);
+    // 2. Fetch paginated ledger rows based on requested ledger type
+    let rowsData = [];
+    let totalRows = 0;
+
+    if (requestedLedger === 'payments') {
+      totalRows = summary.countPayments ?? 0;
+      const { data } = await admin
+        .from('payment_transactions')
+        .select('id, user_id, purpose, amount, currency, status, provider, provider_transaction_id, external_reference, created_at, metadata')
+        .order('created_at', { ascending: false })
+        .range(from, to);
+      rowsData = data ?? [];
+    } else if (requestedLedger === 'wallet') {
+      totalRows = summary.countWalletTxs ?? 0;
+      const { data } = await admin
+        .from('wallet_transactions')
+        .select('id, wallet_id, user_id, type, amount, balance_before, balance_after, reference, description, created_at, metadata')
+        .order('created_at', { ascending: false })
+        .range(from, to);
+      rowsData = data ?? [];
+    } else if (requestedLedger === 'subscriptions') {
+      totalRows = summary.countSubTxs ?? 0;
+      const { data } = await admin
+        .from('subscription_transactions')
+        .select('id, subscription_id, user_id, plan_id, type, amount, currency, wallet_transaction_id, created_at, metadata')
+        .order('created_at', { ascending: false })
+        .range(from, to);
+      rowsData = data ?? [];
+    } else if (requestedLedger === 'donations') {
+      totalRows = summary.countDonations ?? 0;
+      const { data } = await admin
+        .from('donations')
+        .select('id, user_id, amount, status, transaction_id, external_id, created_at, metadata')
+        .order('created_at', { ascending: false })
+        .range(from, to);
+      rowsData = data ?? [];
+    }
 
     return json({
       success: true,
-      summary: {
-        totalSuccessfulDepositXaf,
-        totalDonationsXaf,
-        totalSubscriptionRevenueXaf,
-        activeSubscribersCount,
-        totalWalletBalanceXaf,
-        recentTxCount: (paymentTxs ?? []).length,
-      },
-      paymentTransactions: paymentTxs ?? [],
-      walletTransactions: walletTxs ?? [],
-      subscriptionTransactions: subscriptionTxs ?? [],
-      donations: donations ?? [],
-      activeSubscriptions: activeSubscriptions ?? [],
-      wallets: walletBalances ?? [],
-      subscriptionPlans: subscriptionPlans ?? [],
+      summary,
+      ledger: requestedLedger,
+      rows: rowsData,
+      page,
+      pageSize,
+      total: totalRows,
+      hasMore: (page * pageSize) < totalRows,
     });
   } catch (error) {
     console.error('admin-financials unhandled exception', error);

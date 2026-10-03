@@ -78,6 +78,8 @@ type PdfImport = {
   extracted_data?: { days?: ImportedDay[]; days_found?: number; review_count?: number } | null;
 };
 
+type FinanceLedger = 'payments' | 'wallet' | 'subscriptions' | 'donations';
+
 export default function AdminScreen() {
   const { session } = useAuth();
   const { themeMode, language } = useSettings();
@@ -109,7 +111,9 @@ export default function AdminScreen() {
 
   // Financials State
   const [financials, setFinancials] = useState<any>(null);
-  const [financeFilter, setFinanceFilter] = useState<'all' | 'deposits' | 'donations' | 'subscriptions'>('all');
+  const [financeLedger, setFinanceLedger] = useState<FinanceLedger>('payments');
+  const [financePage, setFinancePage] = useState(1);
+  const [loadingFinance, setLoadingFinance] = useState(false);
   const [selectedTxDetails, setSelectedTxDetails] = useState<any | null>(null);
 
   const [form, setForm] = useState({
@@ -176,21 +180,27 @@ export default function AdminScreen() {
     }
   }, []);
 
-  const loadFinancials = useCallback(async () => {
+  const loadFinancials = useCallback(async (ledger: FinanceLedger = financeLedger, page = financePage) => {
     if (!supabase) return;
-    const { data, error } = await supabase.functions.invoke('admin-financials');
+    setLoadingFinance(true);
+    const { data, error } = await supabase.functions.invoke('admin-financials', {
+      body: { ledger, page, pageSize: 25 },
+    });
+    setLoadingFinance(false);
     if (!error && data?.success) {
       setFinancials(data);
+    } else {
+      Alert.alert('Financials unavailable', error?.message || data?.message || 'Could not load records. Retry.');
     }
-  }, []);
+  }, [financeLedger, financePage]);
 
   useEffect(() => {
     if (adminTab === 'users') {
       loadUsers();
     } else if (adminTab === 'finance') {
-      loadFinancials();
+      loadFinancials(financeLedger, financePage);
     }
-  }, [adminTab, loadUsers, loadFinancials]);
+  }, [adminTab, financeLedger, financePage, loadUsers, loadFinancials]);
 
   const loadDashboard = useCallback(async () => {
     if (!supabase || !session) return;
@@ -280,7 +290,7 @@ export default function AdminScreen() {
     setRefreshing(true);
     await loadDashboard();
     if (adminTab === 'users') await loadUsers();
-    if (adminTab === 'finance') await loadFinancials();
+    if (adminTab === 'finance') await loadFinancials(financeLedger, financePage);
     setRefreshing(false);
   };
 
@@ -490,16 +500,6 @@ export default function AdminScreen() {
       await loadDashboard();
       Alert.alert('PDF ready for review', `${data?.daysFound ?? 0} daily records extracted. Review is required before importing.`);
     }
-  };
-
-  const retryPdf = async (importId: string) => {
-    if (!supabase) return;
-    const { error } = await supabase.from('devotional_imports').update({ status: 'uploaded', error_message: null, updated_at: new Date().toISOString() }).eq('id', importId);
-    if (error) {
-      Alert.alert('Could not retry import', error.message);
-      return;
-    }
-    await extractPdf(importId);
   };
 
   const deletePdf = async () => {
@@ -895,7 +895,7 @@ export default function AdminScreen() {
 
                   {usersList.map((userItem) => (
                     <View key={userItem.id} style={[styles.editionCard, isDark && styles.darkCard, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
-                      <View>
+                      <View style={{ flex: 1 }}>
                         <Text style={[styles.editionTitle, isDark && styles.darkInk]}>{userItem.email ?? `${userItem.id.slice(0, 18)}...`}</Text>
                         <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>{`Role: ${userItem.role.toUpperCase()}`}</Text>
                       </View>
@@ -915,6 +915,7 @@ export default function AdminScreen() {
                 <View style={[adminExtraStyles.adminPanel, isDark && styles.darkCard]}>
                   <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>Financial Ledgers & Revenue</Text>
 
+                  {/* Summary Metric Cards */}
                   {financials?.summary ? (
                     <View style={adminExtraStyles.metricGrid}>
                       <View style={adminExtraStyles.metricCard}>
@@ -926,31 +927,85 @@ export default function AdminScreen() {
                         <Text style={adminExtraStyles.metricLabel}>Total Voluntary Gifts</Text>
                       </View>
                       <View style={adminExtraStyles.metricCard}>
+                        <Text style={adminExtraStyles.metricValue}>{`${(financials.summary.totalSubscriptionRevenueXaf || 0).toLocaleString()} XAF`}</Text>
+                        <Text style={adminExtraStyles.metricLabel}>Subscription Revenue</Text>
+                      </View>
+                      <View style={adminExtraStyles.metricCard}>
                         <Text style={adminExtraStyles.metricValue}>{financials.summary.activeSubscribersCount || 0}</Text>
                         <Text style={adminExtraStyles.metricLabel}>Active Subscribers</Text>
                       </View>
                     </View>
-                  ) : (
+                  ) : loadingFinance ? (
                     <ActivityIndicator color={DewDesign.colors.forest} style={{ marginVertical: 20 }} />
-                  )}
+                  ) : null}
 
-                  <Text style={[adminExtraStyles.panelHeading, isDark && styles.darkInk, { marginTop: 18 }]}>Recent Payment Transactions</Text>
-                  {(financials?.paymentTransactions ?? []).map((tx: any) => (
+                  {/* Segmented Ledger Switcher */}
+                  <View style={{ flexDirection: 'row', gap: 6, marginVertical: 14 }}>
+                    {(['payments', 'wallet', 'subscriptions', 'donations'] as const).map((led) => (
+                      <Pressable
+                        key={led}
+                        onPress={() => { setFinanceLedger(led); setFinancePage(1); }}
+                        style={[styles.statusButton, financeLedger === led && styles.publishButton, { flex: 1, alignItems: 'center' }]}>
+                        <Text style={[styles.statusButtonText, financeLedger === led && styles.publishButtonText]}>{led.toUpperCase()}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <Text style={[adminExtraStyles.panelHeading, isDark && styles.darkInk, { marginTop: 0 }]}>
+                      {`${financeLedger.toUpperCase()} LEDGER (${financials?.total ?? 0} total)`}
+                    </Text>
+                    {loadingFinance ? <ActivityIndicator size="small" color={DewDesign.colors.forest} /> : null}
+                  </View>
+
+                  {/* Paginated Ledger Rows */}
+                  {(financials?.rows ?? []).map((row: any) => (
                     <Pressable
-                      key={tx.id}
-                      onPress={() => setSelectedTxDetails(tx)}
+                      key={row.id}
+                      onPress={() => setSelectedTxDetails(row)}
                       style={[styles.editionCard, isDark && styles.darkCard]}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <View>
-                          <Text style={[styles.editionTitle, isDark && styles.darkInk]}>{`${(tx.amount || 0).toLocaleString()} XAF`}</Text>
-                          <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>{`Purpose: ${tx.purpose} · ${new Date(tx.created_at).toLocaleDateString()}`}</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.editionTitle, isDark && styles.darkInk]}>
+                            {`${(row.amount || 0).toLocaleString()} ${row.currency ?? 'XAF'}`}
+                          </Text>
+                          <Text style={[styles.editionMeta, isDark && styles.darkMuted]} numberOfLines={1}>
+                            {row.purpose
+                              ? `Purpose: ${row.purpose} · ${new Date(row.created_at).toLocaleDateString()}`
+                              : row.type
+                              ? `Type: ${row.type.toUpperCase()} · ${new Date(row.created_at).toLocaleDateString()}`
+                              : new Date(row.created_at).toLocaleDateString()}
+                          </Text>
                         </View>
-                        <View style={[styles.statusButton, tx.status === 'successful' && styles.publishButton]}>
-                          <Text style={[styles.statusButtonText, tx.status === 'successful' && styles.publishButtonText]}>{tx.status.toUpperCase()}</Text>
-                        </View>
+                        {row.status ? (
+                          <View style={[styles.statusButton, row.status === 'successful' && styles.publishButton]}>
+                            <Text style={[styles.statusButtonText, row.status === 'successful' && styles.publishButtonText]}>{String(row.status).toUpperCase()}</Text>
+                          </View>
+                        ) : null}
                       </View>
                     </Pressable>
                   ))}
+
+                  {/* Pagination Controls */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 14 }}>
+                    <Pressable
+                      disabled={financePage <= 1 || loadingFinance}
+                      onPress={() => setFinancePage((p) => Math.max(1, p - 1))}
+                      style={[styles.actionBtnPill, (financePage <= 1 || loadingFinance) && styles.disabledButton]}>
+                      <AppIcon name="chevron.left" size={14} tintColor={DewDesign.colors.forest} />
+                      <Text style={styles.actionBtnLabel}>Previous</Text>
+                    </Pressable>
+
+                    <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>{`Page ${financials?.page ?? 1} of ${Math.ceil((financials?.total ?? 1) / (financials?.pageSize ?? 25)) || 1}`}</Text>
+
+                    <Pressable
+                      disabled={!financials?.hasMore || loadingFinance}
+                      onPress={() => setFinancePage((p) => p + 1)}
+                      style={[styles.actionBtnPill, (!financials?.hasMore || loadingFinance) && styles.disabledButton]}>
+                      <Text style={styles.actionBtnLabel}>Next</Text>
+                      <AppIcon name="chevron.right" size={14} tintColor={DewDesign.colors.forest} />
+                    </Pressable>
+                  </View>
                 </View>
               ) : adminTab === 'analytics' ? (
                 <View style={[adminExtraStyles.adminPanel, isDark && styles.darkCard]}>
@@ -981,6 +1036,36 @@ export default function AdminScreen() {
         </ScrollView>
 
         <AdminBottomNav activeTab={adminTab} onChange={setAdminTab} />
+
+        {/* Transaction Details Modal */}
+        <Modal visible={Boolean(selectedTxDetails)} transparent animationType="slide" onRequestClose={() => setSelectedTxDetails(null)}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={adminExtraStyles.modalBackdrop}>
+            <View style={[adminExtraStyles.modalPanel, isDark && styles.darkCard]}>
+              <ScrollView style={adminExtraStyles.modalScroll} contentContainerStyle={adminExtraStyles.modalContent}>
+                <View style={styles.composerHeader}>
+                  <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>Transaction Details</Text>
+                  <Pressable onPress={() => setSelectedTxDetails(null)}>
+                    <AppIcon name="xmark" size={18} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />
+                  </Pressable>
+                </View>
+
+                <View style={[styles.editionCard, isDark && styles.darkCard]}>
+                  <Text style={[styles.fieldLabel, isDark && styles.darkMuted]}>{`ID: ${selectedTxDetails?.id}`}</Text>
+                  <Text style={[styles.fieldLabel, isDark && styles.darkMuted]}>{`User ID: ${selectedTxDetails?.user_id}`}</Text>
+                  <Text style={[styles.fieldLabel, isDark && styles.darkMuted]}>{`Amount: ${(selectedTxDetails?.amount || 0).toLocaleString()} ${selectedTxDetails?.currency ?? 'XAF'}`}</Text>
+                  <Text style={[styles.fieldLabel, isDark && styles.darkMuted]}>{`Status: ${selectedTxDetails?.status ?? 'N/A'}`}</Text>
+                  <Text style={[styles.fieldLabel, isDark && styles.darkMuted]}>{`Created: ${new Date(selectedTxDetails?.created_at || Date.now()).toLocaleString()}`}</Text>
+                  {selectedTxDetails?.provider_transaction_id ? (
+                    <Text style={[styles.fieldLabel, isDark && styles.darkMuted]}>{`Provider Ref: ${selectedTxDetails.provider_transaction_id}`}</Text>
+                  ) : null}
+                  {selectedTxDetails?.external_reference ? (
+                    <Text style={[styles.fieldLabel, isDark && styles.darkMuted]}>{`External Ref: ${selectedTxDetails.external_reference}`}</Text>
+                  ) : null}
+                </View>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
 
         {/* Create User Modal */}
         <Modal visible={showCreateUserModal} transparent animationType="slide" onRequestClose={() => setShowCreateUserModal(false)}>
