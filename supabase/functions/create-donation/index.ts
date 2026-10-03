@@ -121,16 +121,20 @@ Deno.serve(async (request) => {
       const providerMessage = result?.message || rawResponse || 'No response body was returned by Fapshi.';
       console.error(`Fapshi Direct Pay donation failed: HTTP ${response.status} - ${providerMessage}`);
 
-      await admin
+      const { error: failureUpdateError } = await admin
         .from('donations')
         .update({ status: 'failed', metadata: { error: providerMessage, verification_token: verificationToken } })
         .eq('id', pendingDonation.id);
 
+      if (failureUpdateError) {
+        console.error('Failed to persist donation failure status:', failureUpdateError);
+      }
+
       throw new Error(`Fapshi HTTP ${response.status}: ${providerMessage}`);
     }
 
-    // 3. Update donation row with provider transaction_id
-    await admin
+    // 3. Update donation row with provider transaction_id with explicit error checking
+    const { error: donationUpdateError } = await admin
       .from('donations')
       .update({
         transaction_id: result.transId,
@@ -143,6 +147,17 @@ Deno.serve(async (request) => {
         },
       })
       .eq('id', pendingDonation.id);
+
+    if (donationUpdateError) {
+      console.error('Failed to persist successful donation transaction:', donationUpdateError);
+      return json(
+        {
+          error: 'DONATION_PERSISTENCE_FAILED',
+          message: 'The payment was requested but the donation record could not be updated.',
+        },
+        500
+      );
+    }
 
     return json({
       success: true,
