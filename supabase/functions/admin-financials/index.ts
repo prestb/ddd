@@ -52,23 +52,18 @@ Deno.serve(async (request) => {
     const to = from + pageSize - 1;
 
     // 1. Get complete summary metrics across all tables via RPC
-    const { data: summaryResult, error: summaryError } = await admin.rpc('get_admin_financial_summary');
+    const { data: summaryResult, error: summaryError } =
+      await admin.rpc('get_admin_financial_summary');
 
-    let summary = summaryResult;
-    if (summaryError || !summary) {
-      console.warn('admin-financials: RPC get_admin_financial_summary unavailable, using fallback query', summaryError);
-      summary = {
-        totalSuccessfulDepositXaf: 0,
-        totalDonationsXaf: 0,
-        totalSubscriptionRevenueXaf: 0,
-        activeSubscribersCount: 0,
-        totalWalletBalanceXaf: 0,
-        countPayments: 0,
-        countWalletTxs: 0,
-        countSubTxs: 0,
-        countDonations: 0,
-      };
+    if (summaryError || !summaryResult) {
+      console.error('admin-financials: financial summary RPC failed', summaryError);
+      return json({
+        error: 'FINANCIAL_SUMMARY_UNAVAILABLE',
+        message: 'Financial summary could not be verified. Please try again.',
+      }, 503);
     }
+
+    const summary = summaryResult;
 
     // 2. Fetch paginated ledger rows based on requested ledger type
     let rowsData = [];
