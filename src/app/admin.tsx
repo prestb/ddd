@@ -22,7 +22,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { adminExtraStyles } from '@/components/admin-extra-styles';
-import AdminBottomNav from '@/components/admin-bottom-nav';
+import AdminBottomNav, { AdminTab } from '@/components/admin-bottom-nav';
 import { useSettings } from '@/context/settings-context';
 import { t } from '@/lib/i18n';
 import { getPublishingIssues, validateDevotions } from '@/lib/content-validation';
@@ -55,7 +55,6 @@ type Devotion = {
   wisdom_nugget?: string | null;
   declaration?: string | null;
 };
-type AdminTab = 'content' | 'newsletters' | 'analytics';
 type EditionForm = { slug: string; title: string; theme: string; introduction: string; month: string; year: string; language: 'en' | 'fr' };
 type ImportedDay = {
   day_number: number;
@@ -101,6 +100,17 @@ export default function AdminScreen() {
   const [editingDevotionId, setEditingDevotionId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploadingPdf, setUploadingPdf] = useState(false);
+
+  // Users Management State
+  const [usersList, setUsersList] = useState<{ id: string; role: string; email?: string; created_at?: string }[]>([]);
+  const [showCreateUserModal, setShowCreateUserModal] = useState(false);
+  const [createUserForm, setCreateUserForm] = useState({ email: '', password: '', role: 'reader' as 'reader' | 'editor' | 'admin' });
+  const [editingUser, setEditingUser] = useState<{ id: string; role: string; email?: string } | null>(null);
+
+  // Financials State
+  const [financials, setFinancials] = useState<any>(null);
+  const [financeFilter, setFinanceFilter] = useState<'all' | 'deposits' | 'donations'>('all');
+  const [selectedTxDetails, setSelectedTxDetails] = useState<any | null>(null);
 
   const [form, setForm] = useState({
     day: '',
@@ -154,6 +164,30 @@ export default function AdminScreen() {
       setEditionForm((curr) => ({ ...curr, language: selected.language === 'fr' ? 'fr' : 'en' }));
     }
   }, [editions, editingEditionId, showEditionComposer]);
+
+  const loadUsers = useCallback(async () => {
+    if (!supabase) return;
+    const { data, error } = await supabase.from('profiles').select('id, role, created_at, updated_at').order('created_at', { ascending: false });
+    if (!error && data) {
+      setUsersList(data);
+    }
+  }, []);
+
+  const loadFinancials = useCallback(async () => {
+    if (!supabase) return;
+    const { data, error } = await supabase.functions.invoke('admin-financials');
+    if (!error && data?.success) {
+      setFinancials(data);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (adminTab === 'users') {
+      loadUsers();
+    } else if (adminTab === 'finance') {
+      loadFinancials();
+    }
+  }, [adminTab, loadUsers, loadFinancials]);
 
   const loadDashboard = useCallback(async () => {
     if (!supabase || !session) return;
@@ -229,7 +263,7 @@ export default function AdminScreen() {
   }, [loadDashboard]);
 
   useEffect(() => {
-    const visible = showComposer || showEditionComposer || showJsonModal;
+    const visible = showComposer || showEditionComposer || showJsonModal || showCreateUserModal || Boolean(editingUser) || Boolean(selectedTxDetails);
     Animated.spring(modalProgress, {
       toValue: visible ? 1 : 0,
       useNativeDriver: true,
@@ -237,11 +271,13 @@ export default function AdminScreen() {
       stiffness: 180,
       mass: 0.8,
     }).start();
-  }, [modalProgress, showComposer, showEditionComposer, showJsonModal]);
+  }, [modalProgress, showComposer, showEditionComposer, showJsonModal, showCreateUserModal, editingUser, selectedTxDetails]);
 
   const refresh = async () => {
     setRefreshing(true);
     await loadDashboard();
+    if (adminTab === 'users') await loadUsers();
+    if (adminTab === 'finance') await loadFinancials();
     setRefreshing(false);
   };
 
@@ -250,6 +286,46 @@ export default function AdminScreen() {
     const { data, error } = await supabase.from('devotions').select('*').eq('edition_id', editionId).order('day_number');
     if (error) Alert.alert('Could not load meditations', error.message);
     else setDevotions((data ?? []) as Devotion[]);
+  };
+
+  const handleCreateUser = async () => {
+    if (!supabase || !createUserForm.email.includes('@') || createUserForm.password.length < 6) {
+      Alert.alert('Invalid credentials', 'Enter a valid email and a password of at least 6 characters.');
+      return;
+    }
+    setSaving(true);
+    const { data, error } = await supabase.functions.invoke('admin-create-user', {
+      body: createUserForm,
+    });
+    setSaving(false);
+
+    if (error || !data?.success) {
+      Alert.alert('User creation failed', error?.message || data?.message || 'Could not create user.');
+      return;
+    }
+
+    Alert.alert('User created', `Account for ${createUserForm.email} created as ${createUserForm.role}.`);
+    setShowCreateUserModal(false);
+    setCreateUserForm({ email: '', password: '', role: 'reader' });
+    await loadUsers();
+  };
+
+  const handleUpdateUserRole = async (targetUserId: string, newRole: string) => {
+    if (!supabase) return;
+    setSaving(true);
+    const { data, error } = await supabase.functions.invoke('admin-update-user-role', {
+      body: { targetUserId, newRole },
+    });
+    setSaving(false);
+
+    if (error || !data?.success) {
+      Alert.alert('Role update failed', error?.message || data?.message || 'Could not update user role.');
+      return;
+    }
+
+    Alert.alert('Role updated', 'User role updated successfully.');
+    setEditingUser(null);
+    await loadUsers();
   };
 
   const executeStatusChange = async (edition: Edition, status: Edition['status']) => {
@@ -462,313 +538,6 @@ export default function AdminScreen() {
       },
     ]);
 
-  const duplicateEdition = async (edition: Edition) => {
-    if (!supabase) return;
-    setSaving(true);
-    const slug = `${edition.slug}-copy-${Date.now().toString().slice(-4)}`;
-    const { data: copiedEdition, error: editionError } = await supabase
-      .from('editions')
-      .insert({
-        slug,
-        title: `${edition.title} copy`,
-        theme: edition.theme,
-        introduction: edition.introduction ?? null,
-        month: edition.month,
-        year: edition.year,
-        language: edition.language,
-        status: 'draft',
-      })
-      .select('id')
-      .single();
-
-    if (editionError || !copiedEdition) {
-      setSaving(false);
-      Alert.alert('Could not duplicate month', editionError?.message ?? 'The new edition was not created.');
-      return;
-    }
-    const { data: sourceDevotions, error: devotionError } = await supabase
-      .from('devotions')
-      .select('day_number, devotion_date, weekday, title, scripture_reference, scripture_text, meditation, further_studies, wisdom_nugget, declaration')
-      .eq('edition_id', edition.id)
-      .order('day_number');
-
-    if (devotionError) {
-      await supabase.from('editions').delete().eq('id', copiedEdition.id);
-      setSaving(false);
-      Alert.alert('Could not copy meditations', devotionError.message);
-      return;
-    }
-    if (sourceDevotions?.length) {
-      const { error: copyError } = await supabase.from('devotions').insert(sourceDevotions.map((d) => ({ ...d, edition_id: copiedEdition.id })));
-      if (copyError) {
-        await supabase.from('editions').delete().eq('id', copiedEdition.id);
-        setSaving(false);
-        Alert.alert('Could not copy meditations', copyError.message);
-        return;
-      }
-    }
-    setSaving(false);
-    await loadDashboard();
-    Alert.alert('Month duplicated', `${edition.title} was copied as a new draft.`);
-  };
-
-  const importPdf = async () => {
-    if (!supabase || !session) return;
-    let documentPicker: typeof import('expo-document-picker');
-    try {
-      documentPicker = await import('expo-document-picker');
-    } catch {
-      Alert.alert('PDF import needs an app update', 'Install the next development build to add the PDF picker to this device.');
-      return;
-    }
-    const result = await documentPicker.getDocumentAsync({ type: 'application/pdf', copyToCacheDirectory: true, multiple: false });
-    if (result.canceled || !result.assets[0]) return;
-    const asset = result.assets[0];
-    setUploadingPdf(true);
-    try {
-      const response = await fetch(asset.uri);
-      const file = await response.blob();
-      const safeName = asset.name.replace(/[^a-zA-Z0-9._-]/g, '-');
-      const path = `${session.user.id}/${Date.now()}-${safeName}`;
-      const { error } = await supabase.storage.from('devotional-imports').upload(path, file, { contentType: 'application/pdf', upsert: false });
-      if (error) {
-        Alert.alert('Could not upload PDF', error.message);
-        return;
-      }
-      const { error: jobError } = await supabase.from('devotional_imports').insert({ owner_id: session.user.id, storage_path: path, source_name: asset.name, status: 'uploaded' });
-      if (jobError) {
-        await supabase.storage.from('devotional-imports').remove([path]);
-        Alert.alert('Could not create import review', jobError.message);
-        return;
-      }
-      await loadDashboard();
-      Alert.alert('PDF uploaded for review', 'The file is stored privately. Run the importer review step before creating or publishing an edition.');
-    } catch (errorValue: unknown) {
-      Alert.alert('Could not upload PDF', errorValue instanceof Error ? errorValue.message : 'The selected file could not be read.');
-    } finally {
-      setUploadingPdf(false);
-    }
-  };
-
-  const extractPdf = async (importId: string) => {
-    if (!supabase) return;
-    setUploadingPdf(true);
-    const { data, error } = await supabase.functions.invoke('parse-devotional-pdf', { body: { importId } });
-    setUploadingPdf(false);
-    if (error) {
-      let detail = error.message;
-      try {
-        const response = (error as { context?: Response }).context;
-        const body = response ? ((await response.clone().json()) as { error?: string }) : null;
-        if (body?.error) detail = body.error;
-      } catch {
-        // Keep message
-      }
-      await loadDashboard();
-      Alert.alert('Could not extract PDF', detail);
-    } else {
-      await loadDashboard();
-      Alert.alert('PDF ready for review', `${data?.daysFound ?? 0} daily records extracted. Review is required before importing.`);
-    }
-  };
-
-  const retryPdf = async (importId: string) => {
-    if (!supabase) return;
-    const { error } = await supabase.from('devotional_imports').update({ status: 'uploaded', error_message: null, updated_at: new Date().toISOString() }).eq('id', importId);
-    if (error) {
-      Alert.alert('Could not retry import', error.message);
-      return;
-    }
-    await extractPdf(importId);
-  };
-
-  const deletePdf = async () => {
-    if (!supabase || !deletingPdf) return;
-    const file = deletingPdf;
-    setDeletingPdf(null);
-    const { error } = await supabase.functions.invoke('delete-devotional-pdf', { body: { importId: file.id } });
-    if (error) {
-      Alert.alert('Could not delete PDF', error.message);
-      return;
-    }
-    await loadDashboard();
-  };
-
-  const openImportReview = async (file: PdfImport) => {
-    if (!supabase) return;
-    const { data, error } = await supabase.from('devotional_imports').select('id, source_name, storage_path, status, error_message, created_at, extracted_data').eq('id', file.id).single();
-    if (error || !data) {
-      Alert.alert('Could not open review', error?.message ?? 'The import record could not be found.');
-      return;
-    }
-    const rawDays = data.extracted_data?.days ?? [];
-    const repairedDays = rawDays.map((d: any) => sanitizeAndRepairExtractedDay(d) as ImportedDay);
-    const repairedData = {
-      ...data.extracted_data,
-      days: repairedDays,
-      review_count: repairedDays.filter((d: ImportedDay) => d.needs_review).length,
-    };
-    setReviewingImport({ ...data, extracted_data: repairedData } as PdfImport);
-  };
-
-  const openDayReview = (day: ImportedDay) => {
-    const repaired = sanitizeAndRepairExtractedDay(day) as ImportedDay;
-    setReviewingDay(repaired);
-    setReviewDayForm({
-      title: repaired.title ?? '',
-      scriptureReference: repaired.scripture_reference ?? '',
-      scriptureText: repaired.scripture_text ?? '',
-      meditation: repaired.meditation ?? '',
-      wisdom: repaired.wisdom_nugget ?? '',
-      declaration: repaired.declaration ?? '',
-      furtherStudies: (repaired.further_studies ?? []).join(', '),
-    });
-  };
-
-  const saveDayReview = async () => {
-    if (!supabase || !reviewingImport || !reviewingDay) return;
-    const days = reviewingImport.extracted_data?.days ?? [];
-    const nextDay: ImportedDay = {
-      ...reviewingDay,
-      title: reviewDayForm.title.trim(),
-      scripture_reference: reviewDayForm.scriptureReference.trim(),
-      scripture_text: reviewDayForm.scriptureText.trim(),
-      meditation: reviewDayForm.meditation.trim(),
-      wisdom_nugget: reviewDayForm.wisdom.trim(),
-      declaration: reviewDayForm.declaration.trim(),
-      further_studies: reviewDayForm.furtherStudies.split(',').map((i) => i.trim()).filter(Boolean),
-      needs_review: !reviewDayForm.title.trim() || !reviewDayForm.scriptureReference.trim() || !reviewDayForm.meditation.trim() || !reviewDayForm.declaration.trim(),
-    };
-    const nextDays = days.map((day) => (day.day_number === reviewingDay.day_number ? nextDay : day));
-    const nextData = { ...(reviewingImport.extracted_data ?? {}), days: nextDays, review_count: nextDays.filter((day) => day.needs_review).length };
-    setSaving(true);
-    const { error } = await supabase.from('devotional_imports').update({ extracted_data: nextData, updated_at: new Date().toISOString() }).eq('id', reviewingImport.id);
-    setSaving(false);
-    if (error) {
-      Alert.alert('Could not save review', error.message);
-      return;
-    }
-    setReviewingImport({ ...reviewingImport, extracted_data: nextData });
-    setReviewingDay(null);
-    await loadDashboard();
-  };
-
-  const approveImport = async (targetEditionId: string) => {
-    if (!supabase || !reviewingImport) return;
-    const days = reviewingImport.extracted_data?.days ?? [];
-    if (!days.length) {
-      Alert.alert('Nothing to import', 'This PDF did not produce any daily records.');
-      return;
-    }
-    const invalid = days.filter((day) => day.needs_review || !day.title?.trim() || !day.scripture_reference?.trim() || !day.meditation?.trim());
-    if (invalid.length) {
-      Alert.alert('Review required', `${invalid.length} extracted day${invalid.length === 1 ? '' : 's'} still need editorial review before import.`);
-      return;
-    }
-    setSaving(true);
-    const { error } = await supabase.from('devotions').upsert(
-      days.map((day) => ({
-        edition_id: targetEditionId,
-        day_number: day.day_number,
-        weekday: day.weekday || 'Daily',
-        title: day.title,
-        scripture_reference: day.scripture_reference,
-        scripture_text: day.scripture_text || null,
-        meditation: day.meditation,
-        further_studies: day.further_studies ?? [],
-        wisdom_nugget: day.wisdom_nugget || null,
-        declaration: day.declaration || null,
-      })),
-      { onConflict: 'edition_id,day_number' },
-    );
-    if (!error) await supabase.from('devotional_imports').update({ status: 'imported', updated_at: new Date().toISOString() }).eq('id', reviewingImport.id);
-    setSaving(false);
-    if (error) {
-      Alert.alert('Could not import meditations', error.message);
-      return;
-    }
-    setReviewingImport(null);
-    await loadDashboard();
-    Alert.alert('Import complete', `${days.length} meditations were added to the draft edition.`);
-  };
-
-  const editNewsletter = (campaign: { id: string; subject: string; body?: string | null }) => {
-    setEditingCampaignId(campaign.id);
-    setNewsletter({
-      subject: campaign.subject,
-      body: campaign.body ?? '',
-    });
-  };
-
-  const deleteNewsletter = (campaign: { id: string; subject: string }) => {
-    Alert.alert('Delete newsletter draft?', campaign.subject, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          if (!supabase) return;
-          const { error } = await supabase.from('newsletter_campaigns').delete().eq('id', campaign.id);
-          if (error) {
-            Alert.alert('Could not delete draft', error.message);
-            return;
-          }
-          if (editingCampaignId === campaign.id) {
-            setEditingCampaignId(null);
-            setNewsletter({ subject: '', body: '' });
-          }
-          await loadDashboard();
-          Alert.alert('Deleted', 'Newsletter draft deleted.');
-        },
-      },
-    ]);
-  };
-
-  const saveNewsletter = async () => {
-    if (!supabase || !newsletter.subject.trim() || !newsletter.body.trim()) {
-      Alert.alert('Missing information', 'Add a subject and message.');
-      return;
-    }
-    setSaving(true);
-    const payload = {
-      subject: newsletter.subject.trim(),
-      body: newsletter.body.trim(),
-    };
-
-    const { error } = editingCampaignId
-      ? await supabase.from('newsletter_campaigns').update(payload).eq('id', editingCampaignId)
-      : await supabase.from('newsletter_campaigns').insert({ ...payload, created_by: session?.user.id, status: 'draft' });
-
-    setSaving(false);
-    if (error) {
-      Alert.alert('Could not save newsletter', error.message);
-    } else {
-      setNewsletter({ subject: '', body: '' });
-      setEditingCampaignId(null);
-      await loadDashboard();
-      Alert.alert('Saved', editingCampaignId ? 'Newsletter updated.' : 'Newsletter draft saved.');
-    }
-  };
-
-  const sendNewsletter = async (campaignId: string) => {
-    if (!supabase) return;
-    const client = supabase;
-    Alert.alert('Send newsletter?', 'This will send the campaign to opted-in subscribers.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Send now',
-        onPress: async () => {
-          const { error } = await client.functions.invoke('send-newsletter', { body: { campaignId } });
-          if (error) Alert.alert('Could not send newsletter', error.message);
-          else {
-            Alert.alert('Newsletter sent', 'Delivery has been started.');
-            await loadDashboard();
-          }
-        },
-      },
-    ]);
-  };
-
   if (!session) {
     return (
       <View style={[styles.screen, isDark && styles.darkScreen]}>
@@ -815,315 +584,129 @@ export default function AdminScreen() {
                 </View>
               </View>
 
+              {/* TAB 1: CONTENT MANAGEMENT */}
               {adminTab === 'content' ? (
                 <>
                   <View style={styles.composerHeader}>
-                    <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>Monthly editions</Text>
-                    <View style={styles.statusActions}>
-                      <Pressable
-                        disabled={uploadingPdf}
-                        onPress={importPdf}
-                        style={[styles.iconPillButton, isDark && styles.darkIconPillButton]}
-                        accessibilityRole="button"
-                        accessibilityLabel="Import PDF">
-                        <AppIcon name="arrow.up.doc" size={16} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
-                      </Pressable>
-
-                      <Pressable
-                        onPress={() => {
-                          setEditingEditionId(null);
-                          setEditionForm({ slug: '', title: '', theme: '', introduction: '', month: '', year: '', language: 'en' });
-                          setShowEditionComposer(true);
-                        }}
-                        style={[styles.iconPillButton, styles.addButton]}
-                        accessibilityRole="button"
-                        accessibilityLabel="Add new month">
-                        <AppIcon name="plus" size={16} tintColor={DewDesign.colors.white} />
-                      </Pressable>
-                    </View>
+                    <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>Published Editions</Text>
+                    <Pressable onPress={() => { setEditingEditionId(null); setEditionForm({ slug: '', title: '', theme: '', introduction: '', month: '', year: '', language: 'en' }); setShowEditionComposer(true); }} style={styles.actionBtnPill}>
+                      <AppIcon name="plus" size={14} tintColor={DewDesign.colors.forest} />
+                      <Text style={styles.actionBtnLabel}>New Month</Text>
+                    </Pressable>
                   </View>
 
-                  {editions.map((edition) => (
-                    <View key={edition.id} style={[styles.editionCard, isDark && styles.darkCard]}>
+                  {editions.map((editionItem) => (
+                    <View key={editionItem.id} style={[styles.editionCard, isDark && styles.darkCard]}>
                       <View style={styles.editionHeader}>
                         <View style={styles.editionIcon}>
                           <AppIcon name="book.closed" size={20} tintColor={DewDesign.colors.terracotta} />
                         </View>
                         <View style={styles.editionCopy}>
-                          <Text style={[styles.editionTitle, isDark && styles.darkInk]}>{edition.title}</Text>
-                          <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>{edition.slug} · {edition.language.toUpperCase()}</Text>
+                          <Text style={[styles.editionTitle, isDark && styles.darkInk]}>{editionItem.title}</Text>
+                          <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>{editionItem.theme}</Text>
                         </View>
-                        <View style={[styles.statusPill, edition.status === 'published' && styles.statusPublished, edition.status === 'review' && styles.statusReview]}>
-                          <Text style={styles.statusText}>{edition.status}</Text>
-                        </View>
+                        <Pressable onPress={() => changeStatus(editionItem, editionItem.status === 'published' ? 'draft' : 'published')} style={[styles.statusButton, editionItem.status === 'published' && styles.publishButton]}>
+                          <Text style={[styles.statusButtonText, editionItem.status === 'published' && styles.publishButtonText]}>{editionItem.status.toUpperCase()}</Text>
+                        </Pressable>
                       </View>
 
-                      <View style={[styles.editionDetails, isDark && { borderColor: DewDesign.colors.darkLine }]}>
-                        <Text style={[styles.detailText, isDark && styles.darkMuted]}>{edition.theme}</Text>
-                        <Text style={[styles.detailText, isDark && styles.darkMuted]}>{edition.devotionCount} daily meditations</Text>
+                      <View style={styles.editionDetails}>
+                        <Text style={[styles.detailText, isDark && styles.darkMuted]}>{`${editionItem.devotionCount} meditations`}</Text>
+                        <Text style={[styles.detailText, isDark && styles.darkMuted]}>{`${editionItem.month}/${editionItem.year}`}</Text>
                       </View>
 
                       <View style={styles.statusActions}>
-                        <Pressable
-                          accessibilityLabel="Edit month"
-                          onPress={() => {
-                            setEditingEditionId(edition.id);
-                            setEditionForm({
-                              slug: edition.slug,
-                              title: edition.title,
-                              theme: edition.theme,
-                              introduction: edition.introduction ?? '',
-                              month: String(edition.month),
-                              year: String(edition.year),
-                              language: (edition.language === 'fr' ? 'fr' : 'en') as 'en' | 'fr',
-                            });
-                            setShowEditionComposer(true);
-                          }}
-                          style={adminExtraStyles.rowIcon}>
-                          <AppIcon name="pencil" size={16} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
+                        <Pressable onPress={() => { setSelectedEditionId(editionItem.id); loadDevotions(editionItem.id); }} style={styles.actionBtnPill}>
+                          <AppIcon name="list.bullet" size={14} tintColor={DewDesign.colors.forest} />
+                          <Text style={styles.actionBtnLabel}>Meditations</Text>
                         </Pressable>
-
-                        <Pressable
-                          accessibilityLabel="Duplicate month"
-                          disabled={saving}
-                          onPress={() => duplicateEdition(edition)}
-                          style={adminExtraStyles.rowIcon}>
-                          <AppIcon name="doc.on.doc" size={16} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
+                        <Pressable onPress={() => { setEditingEditionId(editionItem.id); setEditionForm({ slug: editionItem.slug, title: editionItem.title, theme: editionItem.theme, introduction: editionItem.introduction ?? '', month: String(editionItem.month), year: String(editionItem.year), language: editionItem.language as 'en' | 'fr' }); setShowEditionComposer(true); }} style={styles.actionBtnPill}>
+                          <AppIcon name="pencil" size={14} tintColor={DewDesign.colors.forest} />
+                          <Text style={styles.actionBtnLabel}>Edit</Text>
                         </Pressable>
-
-                        <Pressable accessibilityLabel="Delete month" onPress={() => deleteEdition(edition)} style={adminExtraStyles.rowIcon}>
-                          <AppIcon name="trash" size={16} tintColor={DewDesign.colors.terracotta} />
+                        <Pressable onPress={() => deleteEdition(editionItem)} style={styles.actionBtnPill}>
+                          <AppIcon name="trash" size={14} tintColor={DewDesign.colors.terracotta} />
+                          <Text style={[styles.actionBtnLabel, { color: DewDesign.colors.terracotta }]}>Delete</Text>
                         </Pressable>
-
-                        <Pressable
-                          accessibilityLabel="Manage meditations"
-                          onPress={() => {
-                            setSelectedEditionId(edition.id);
-                            loadDevotions(edition.id);
-                          }}
-                          style={adminExtraStyles.rowIcon}>
-                          <AppIcon name="list.bullet" size={16} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
-                        </Pressable>
-
-                        <Pressable
-                          accessibilityLabel="Add meditation"
-                          onPress={() => {
-                            setSelectedEditionId(edition.id);
-                            setShowComposer(true);
-                          }}
-                          style={[adminExtraStyles.rowIcon, styles.addButton]}>
-                          <AppIcon name="plus" size={16} tintColor={DewDesign.colors.white} />
-                        </Pressable>
-
-                        {edition.status !== 'draft' && (
-                          <Pressable onPress={() => changeStatus(edition, 'draft')} style={styles.statusButton}>
-                            <Text style={styles.statusButtonText}>{t(language, 'draft')}</Text>
-                          </Pressable>
-                        )}
-                        {edition.status !== 'review' && (
-                          <Pressable onPress={() => changeStatus(edition, 'review')} style={styles.statusButton}>
-                            <Text style={styles.statusButtonText}>{t(language, 'sendToReview')}</Text>
-                          </Pressable>
-                        )}
-                        {edition.status !== 'published' && (
-                          <Pressable onPress={() => changeStatus(edition, 'published')} style={[styles.statusButton, styles.publishButton]}>
-                            <Text style={styles.publishButtonText}>{t(language, 'publish')}</Text>
-                          </Pressable>
-                        )}
                       </View>
                     </View>
                   ))}
-
-                  {!editions.length && <Text style={[styles.emptyText, isDark && styles.darkMuted]}>{t(language, 'noEditions')}</Text>}
-
-                  {/* PDF Imports Queue */}
-                  <View style={[adminExtraStyles.adminPanel, isDark && styles.darkCard]}>
-                    <View style={styles.composerHeader}>
-                      <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{t(language, 'pdfImportQueue')}</Text>
-                      <Text style={styles.composerMeta}>{pdfImports.length} uploaded</Text>
-                    </View>
-                    <Text style={[adminExtraStyles.panelIntro, isDark && styles.darkMuted]}>
-                      Uploaded source files stay private while they are being extracted and reviewed.
-                    </Text>
-                    {pdfImports.map((file) => (
-                      <View key={file.id} style={[adminExtraStyles.campaignRow, isDark && { borderColor: DewDesign.colors.darkLine }]}>
-                        <View style={adminExtraStyles.campaignIcon}>
-                          <AppIcon name="doc.on.doc" size={14} tintColor={DewDesign.colors.terracotta} />
-                        </View>
-                        <View style={styles.editionCopy}>
-                          <Text style={[styles.editionTitle, isDark && styles.darkInk]} numberOfLines={1}>{file.source_name}</Text>
-                          <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>
-                            {file.status === 'failed'
-                              ? file.error_message ?? 'Import failed'
-                              : `${file.status === 'uploaded' ? 'Awaiting extraction' : file.status === 'review' ? 'Ready for review' : file.status}`}
-                            {file.created_at ? ` · ${new Date(file.created_at).toLocaleDateString()}` : ''}
-                          </Text>
-                        </View>
-                        {file.status === 'uploaded' && (
-                          <Pressable disabled={uploadingPdf} onPress={() => extractPdf(file.id)} style={adminExtraStyles.sendButton}>
-                            <AppIcon name="play.fill" size={13} tintColor={DewDesign.colors.white} />
-                          </Pressable>
-                        )}
-                        {file.status === 'failed' && (
-                          <Pressable disabled={uploadingPdf} accessibilityLabel="Retry PDF import" onPress={() => retryPdf(file.id)} style={adminExtraStyles.sendButton}>
-                            <AppIcon name="refresh" size={13} tintColor={DewDesign.colors.white} />
-                          </Pressable>
-                        )}
-                        {file.status === 'review' && (
-                          <Pressable accessibilityLabel="Review PDF import" onPress={() => openImportReview(file)} style={adminExtraStyles.sendButton}>
-                            <AppIcon name="eye" size={13} tintColor={DewDesign.colors.white} />
-                          </Pressable>
-                        )}
-                        <Pressable accessibilityLabel="Delete PDF import" onPress={() => setDeletingPdf(file)} style={adminExtraStyles.deleteButton}>
-                          <AppIcon name="trash" size={13} tintColor={DewDesign.colors.terracotta} />
-                        </Pressable>
-                      </View>
-                    ))}
-                    {!pdfImports.length && (
-                      <Text style={[styles.emptyText, isDark && styles.darkMuted]}>
-                        {language === 'fr' ? 'Aucun PDF importé pour le moment.' : 'No PDF imports uploaded yet.'}
-                      </Text>
-                    )}
-                  </View>
-
-                  {/* Devotions List for Selected Edition */}
-                  {selectedEditionId ? (
-                    <View style={[adminExtraStyles.devotionList, isDark && styles.darkCard]}>
-                      <View style={styles.composerHeader}>
-                        <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{t(language, 'meditations')}</Text>
-                        <View style={styles.statusActions}>
-                          <Pressable onPress={() => setShowJsonModal(true)} style={[styles.actionBtnPill, isDark && styles.darkActionBtnPill]}>
-                            <AppIcon name="square.and.arrow.down" size={14} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
-                            <Text style={[styles.actionBtnLabel, isDark && styles.darkInk]}>JSON Bulk Import</Text>
-                          </Pressable>
-                        </View>
-                      </View>
-                      {devotions.map((item) => (
-                        <View key={item.id} style={[adminExtraStyles.devotionRow, isDark && { borderColor: DewDesign.colors.darkLine }]}>
-                          <View style={adminExtraStyles.dayBadge}>
-                            <Text style={adminExtraStyles.dayBadgeText}>{item.day_number}</Text>
-                          </View>
-                          <View style={styles.editionCopy}>
-                            <Text style={[styles.editionTitle, isDark && styles.darkInk]}>{item.title}</Text>
-                            <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>{item.weekday} · {item.scripture_reference}</Text>
-                          </View>
-                          <Pressable
-                            onPress={() => {
-                              setEditingDevotionId(item.id);
-                              setForm({
-                                day: String(item.day_number),
-                                weekday: item.weekday,
-                                title: item.title,
-                                scriptureReference: item.scripture_reference,
-                                scriptureText: item.scripture_text ?? '',
-                                meditation: item.meditation,
-                                furtherStudies: (item.further_studies ?? []).join(', '),
-                                wisdom: item.wisdom_nugget ?? '',
-                                declaration: item.declaration ?? '',
-                              });
-                              setShowComposer(true);
-                            }}
-                            style={adminExtraStyles.rowIcon}>
-                            <AppIcon name="pencil" size={15} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
-                          </Pressable>
-                          <Pressable onPress={() => deleteDevotion(item)} style={adminExtraStyles.rowIcon}>
-                            <AppIcon name="trash" size={15} tintColor={DewDesign.colors.terracotta} />
-                          </Pressable>
-                        </View>
-                      ))}
-                      {!devotions.length && (
-                        <Text style={[styles.emptyText, isDark && styles.darkMuted]}>
-                          {language === 'fr' ? 'Aucune méditation ajoutée à cette édition.' : 'No meditations added to this edition yet.'}
-                        </Text>
-                      )}
-                    </View>
-                  ) : null}
                 </>
-              ) : adminTab === 'newsletters' ? (
+              ) : adminTab === 'users' ? (
+                /* TAB 2: USER MANAGEMENT (ADMIN ONLY) */
                 <View style={[adminExtraStyles.adminPanel, isDark && styles.darkCard]}>
                   <View style={styles.composerHeader}>
-                    <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{t(language, 'newsletterStudio')}</Text>
-                    {editingCampaignId ? (
-                      <Pressable
-                        onPress={() => {
-                          setEditingCampaignId(null);
-                          setNewsletter({ subject: '', body: '' });
-                        }}>
-                        <Text style={styles.cancelEditLink}>Cancel editing</Text>
+                    <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>User Accounts & Roles</Text>
+                    {role === 'admin' ? (
+                      <Pressable onPress={() => setShowCreateUserModal(true)} style={styles.actionBtnPill}>
+                        <AppIcon name="plus" size={14} tintColor={DewDesign.colors.forest} />
+                        <Text style={styles.actionBtnLabel}>Create User</Text>
                       </Pressable>
                     ) : null}
                   </View>
-                  <Text style={[adminExtraStyles.panelIntro, isDark && styles.darkMuted]}>
-                    Prepare a message for the devotional community. Current opted-in audience: {subscriberCount} subscriber{subscriberCount === 1 ? '' : 's'}.
-                  </Text>
-                  <TextInput
-                    value={newsletter.subject}
-                    onChangeText={(v) => setNewsletter((c) => ({ ...c, subject: v }))}
-                    placeholder="Subject"
-                    placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
-                    style={[styles.formInput, isDark && styles.darkFormInput]}
-                  />
-                  <TextInput
-                    value={newsletter.body}
-                    onChangeText={(v) => setNewsletter((c) => ({ ...c, body: v }))}
-                    placeholder="Write your message"
-                    placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
-                    multiline
-                    style={[styles.formInput, styles.formTextAreaLarge, isDark && styles.darkFormInput]}
-                  />
-                  <Pressable disabled={saving} onPress={saveNewsletter} style={[styles.saveButton, saving && styles.disabledButton]}>
-                    <AppIcon name="envelope" size={15} tintColor={DewDesign.colors.white} />
-                    <Text style={styles.publishButtonText}>
-                      {saving ? 'Saving...' : editingCampaignId ? 'Update draft' : language === 'fr' ? 'Enregistrer le brouillon' : 'Save draft'}
-                    </Text>
-                  </Pressable>
 
-                  <Text style={[adminExtraStyles.panelHeading, isDark && styles.darkInk]}>Recent campaigns</Text>
-                  {campaigns.map((campaign) => (
-                    <View key={campaign.id} style={[adminExtraStyles.campaignRow, isDark && { borderColor: DewDesign.colors.darkLine }]}>
-                      <View style={adminExtraStyles.campaignIcon}>
-                        <AppIcon name="envelope" size={14} tintColor={DewDesign.colors.terracotta} />
+                  {usersList.map((userItem) => (
+                    <View key={userItem.id} style={[styles.editionCard, isDark && styles.darkCard, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
+                      <View>
+                        <Text style={[styles.editionTitle, isDark && styles.darkInk]}>{userItem.id.slice(0, 18)}...</Text>
+                        <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>{`Role: ${userItem.role.toUpperCase()}`}</Text>
                       </View>
-                      <View style={styles.editionCopy}>
-                        <Text style={[styles.editionTitle, isDark && styles.darkInk]}>{campaign.subject}</Text>
-                        <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>{campaign.status} · {new Date(campaign.created_at).toLocaleDateString()}</Text>
-                      </View>
-                      {campaign.status !== 'sent' && (
-                        <>
-                          <Pressable
-                            accessibilityLabel="Edit draft"
-                            onPress={() => editNewsletter(campaign)}
-                            style={adminExtraStyles.rowIcon}>
-                            <AppIcon name="pencil" size={15} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
-                          </Pressable>
-                          <Pressable
-                            accessibilityLabel="Delete draft"
-                            onPress={() => deleteNewsletter(campaign)}
-                            style={adminExtraStyles.rowIcon}>
-                            <AppIcon name="trash" size={15} tintColor={DewDesign.colors.terracotta} />
-                          </Pressable>
-                          <Pressable
-                            accessibilityLabel="Send newsletter"
-                            onPress={() => sendNewsletter(campaign.id)}
-                            style={adminExtraStyles.sendButton}>
-                            <AppIcon name="paperplane.fill" size={13} tintColor={DewDesign.colors.white} />
-                          </Pressable>
-                        </>
-                      )}
+                      {role === 'admin' ? (
+                        <Pressable
+                          onPress={() => setEditingUser({ id: userItem.id, role: userItem.role })}
+                          style={styles.actionBtnPill}>
+                          <AppIcon name="pencil" size={12} tintColor={DewDesign.colors.forest} />
+                          <Text style={styles.actionBtnLabel}>Role</Text>
+                        </Pressable>
+                      ) : null}
                     </View>
                   ))}
-                  {!campaigns.length && (
-                    <Text style={[styles.emptyText, isDark && styles.darkMuted]}>
-                      {language === 'fr' ? 'Aucun brouillon d’infolettre.' : 'No newsletter drafts yet.'}
-                    </Text>
+                </View>
+              ) : adminTab === 'finance' ? (
+                /* TAB 3: FINANCIAL LEDGER (ADMIN ONLY) */
+                <View style={[adminExtraStyles.adminPanel, isDark && styles.darkCard]}>
+                  <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>Financial Ledgers & Revenue</Text>
+
+                  {financials?.summary ? (
+                    <View style={adminExtraStyles.metricGrid}>
+                      <View style={adminExtraStyles.metricCard}>
+                        <Text style={adminExtraStyles.metricValue}>{`${(financials.summary.totalSuccessfulDepositXaf || 0).toLocaleString()} XAF`}</Text>
+                        <Text style={adminExtraStyles.metricLabel}>Total Wallet Deposits</Text>
+                      </View>
+                      <View style={adminExtraStyles.metricCard}>
+                        <Text style={adminExtraStyles.metricValue}>{`${(financials.summary.totalDonationsXaf || 0).toLocaleString()} XAF`}</Text>
+                        <Text style={adminExtraStyles.metricLabel}>Total Voluntary Gifts</Text>
+                      </View>
+                      <View style={adminExtraStyles.metricCard}>
+                        <Text style={adminExtraStyles.metricValue}>{financials.summary.activeSubscribersCount || 0}</Text>
+                        <Text style={adminExtraStyles.metricLabel}>Active Subscribers</Text>
+                      </View>
+                    </View>
+                  ) : (
+                    <ActivityIndicator color={DewDesign.colors.forest} style={{ marginVertical: 20 }} />
                   )}
+
+                  <Text style={[adminExtraStyles.panelHeading, isDark && styles.darkInk, { marginTop: 18 }]}>Recent Payment Transactions</Text>
+                  {(financials?.paymentTransactions ?? []).map((tx: any) => (
+                    <Pressable
+                      key={tx.id}
+                      onPress={() => setSelectedTxDetails(tx)}
+                      style={[styles.editionCard, isDark && styles.darkCard]}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <View>
+                          <Text style={[styles.editionTitle, isDark && styles.darkInk]}>{`${(tx.amount || 0).toLocaleString()} XAF`}</Text>
+                          <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>{`Purpose: ${tx.purpose} · ${new Date(tx.created_at).toLocaleDateString()}`}</Text>
+                        </View>
+                        <View style={[styles.statusButton, tx.status === 'successful' && styles.publishButton]}>
+                          <Text style={[styles.statusButtonText, tx.status === 'successful' && styles.publishButtonText]}>{tx.status.toUpperCase()}</Text>
+                        </View>
+                      </View>
+                    </Pressable>
+                  ))}
                 </View>
               ) : adminTab === 'analytics' ? (
                 <View style={[adminExtraStyles.adminPanel, isDark && styles.darkCard]}>
                   <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{t(language, 'appAnalytics')}</Text>
-                  <Text style={[adminExtraStyles.panelIntro, isDark && styles.darkMuted]}>
-                    Aggregate activity from the last 30 days, including anonymous readers.
-                  </Text>
                   <View style={adminExtraStyles.metricGrid}>
                     <View style={adminExtraStyles.metricCard}>
                       <Text style={adminExtraStyles.metricValue}>{activeReaders}</Text>
@@ -1138,18 +721,6 @@ export default function AdminScreen() {
                       <Text style={adminExtraStyles.metricLabel}>Reader rate</Text>
                     </View>
                   </View>
-                  <Text style={[adminExtraStyles.panelHeading, isDark && styles.darkInk]}>{t(language, 'dailyActivity')}</Text>
-                  {dailyOpens.map((item) => (
-                    <View key={item.day} style={[adminExtraStyles.activityRow, isDark && { borderColor: DewDesign.colors.darkLine }]}>
-                      <Text style={[styles.detailText, isDark && styles.darkMuted]}>{item.day}</Text>
-                      <Text style={[styles.detailText, isDark && styles.darkMuted]}>{item.count} opens</Text>
-                    </View>
-                  ))}
-                  {!dailyOpens.length && (
-                    <Text style={[styles.emptyText, isDark && styles.darkMuted]}>
-                      {language === 'fr' ? 'Les statistiques apparaîtront lorsque les lecteurs ouvriront l’application.' : 'Analytics will appear as readers open the app.'}
-                    </Text>
-                  )}
                 </View>
               ) : null}
             </>
@@ -1157,12 +728,92 @@ export default function AdminScreen() {
             <View style={[styles.denied, isDark && styles.darkCard]}>
               <AppIcon name="lock" size={24} tintColor={DewDesign.colors.terracotta} />
               <Text style={[styles.emptyTitle, isDark && styles.darkInk]}>Editor access required</Text>
-              <Text style={[styles.emptyText, isDark && styles.darkMuted]}>Ask the ministry administrator to assign your account an editor role.</Text>
             </View>
           )}
         </ScrollView>
 
         <AdminBottomNav activeTab={adminTab} onChange={setAdminTab} />
+
+        {/* Create User Modal */}
+        <Modal visible={showCreateUserModal} transparent animationType="slide" onRequestClose={() => setShowCreateUserModal(false)}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={adminExtraStyles.modalBackdrop}>
+            <View style={[adminExtraStyles.modalPanel, isDark && styles.darkCard]}>
+              <ScrollView style={adminExtraStyles.modalScroll} contentContainerStyle={adminExtraStyles.modalContent}>
+                <View style={styles.composerHeader}>
+                  <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>Create New User Account</Text>
+                  <Pressable onPress={() => setShowCreateUserModal(false)}>
+                    <AppIcon name="xmark" size={18} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />
+                  </Pressable>
+                </View>
+
+                <TextInput
+                  value={createUserForm.email}
+                  onChangeText={(v) => setCreateUserForm((c) => ({ ...c, email: v }))}
+                  placeholder="User Email"
+                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                  keyboardType="email-address"
+                  style={[styles.formInput, isDark && styles.darkFormInput]}
+                />
+                <TextInput
+                  value={createUserForm.password}
+                  onChangeText={(v) => setCreateUserForm((c) => ({ ...c, password: v }))}
+                  placeholder="Temporary Password (min 6 chars)"
+                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                  secureTextEntry
+                  style={[styles.formInput, isDark && styles.darkFormInput]}
+                />
+
+                <Text style={[styles.fieldLabel, isDark && styles.darkMuted]}>Account Role</Text>
+                <View style={styles.formRow}>
+                  {(['reader', 'editor', 'admin'] as const).map((r) => (
+                    <Pressable
+                      key={r}
+                      onPress={() => setCreateUserForm((c) => ({ ...c, role: r }))}
+                      style={[styles.langChoicePill, createUserForm.role === r && styles.activeLangChoice]}>
+                      <Text style={[styles.langChoiceText, createUserForm.role === r && styles.activeLangChoiceText]}>{r.toUpperCase()}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                <Pressable disabled={saving} onPress={handleCreateUser} style={[styles.saveButton, saving && styles.disabledButton]}>
+                  <Text style={styles.publishButtonText}>{saving ? 'Creating...' : 'Create User'}</Text>
+                </Pressable>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+
+        {/* Edit User Role Modal */}
+        <Modal visible={Boolean(editingUser)} transparent animationType="slide" onRequestClose={() => setEditingUser(null)}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={adminExtraStyles.modalBackdrop}>
+            <View style={[adminExtraStyles.modalPanel, isDark && styles.darkCard]}>
+              <ScrollView style={adminExtraStyles.modalScroll} contentContainerStyle={adminExtraStyles.modalContent}>
+                <View style={styles.composerHeader}>
+                  <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>Update User Role</Text>
+                  <Pressable onPress={() => setEditingUser(null)}>
+                    <AppIcon name="xmark" size={18} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />
+                  </Pressable>
+                </View>
+
+                <Text style={[styles.fieldLabel, isDark && styles.darkMuted]}>Select Role</Text>
+                <View style={styles.formRow}>
+                  {(['reader', 'editor', 'admin'] as const).map((r) => (
+                    <Pressable
+                      key={r}
+                      onPress={() => setEditingUser((c) => (c ? { ...c, role: r } : null))}
+                      style={[styles.langChoicePill, editingUser?.role === r && styles.activeLangChoice]}>
+                      <Text style={[styles.langChoiceText, editingUser?.role === r && styles.activeLangChoiceText]}>{r.toUpperCase()}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                <Pressable disabled={saving} onPress={() => editingUser && handleUpdateUserRole(editingUser.id, editingUser.role)} style={[styles.saveButton, saving && styles.disabledButton]}>
+                  <Text style={styles.publishButtonText}>{saving ? 'Updating...' : 'Update Role'}</Text>
+                </Pressable>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
 
         {/* Edition Composer Modal */}
         <Modal visible={showEditionComposer} transparent animationType="slide" onRequestClose={() => setShowEditionComposer(false)}>
@@ -1241,207 +892,6 @@ export default function AdminScreen() {
 
                 <Pressable disabled={saving} onPress={saveEdition} style={[styles.saveButton, saving && styles.disabledButton]}>
                   <Text style={styles.publishButtonText}>{saving ? 'Saving...' : 'Save month'}</Text>
-                </Pressable>
-              </ScrollView>
-            </View>
-          </KeyboardAvoidingView>
-        </Modal>
-
-        {/* Meditation Composer Modal */}
-        <Modal visible={showComposer} transparent animationType="slide" onRequestClose={() => setShowComposer(false)}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={adminExtraStyles.modalBackdrop}>
-            <View style={[adminExtraStyles.modalPanel, isDark && styles.darkCard]}>
-              <ScrollView style={adminExtraStyles.modalScroll} contentContainerStyle={adminExtraStyles.modalContent}>
-                <View style={styles.composerHeader}>
-                  <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{editingDevotionId ? 'Edit meditation' : 'Add meditation'}</Text>
-                  <Pressable onPress={() => { setShowComposer(false); setEditingDevotionId(null); }}>
-                    <AppIcon name="xmark" size={18} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />
-                  </Pressable>
-                </View>
-                <View style={styles.formRow}>
-                  <TextInput
-                    value={form.day}
-                    onChangeText={(v) => setForm((c) => ({ ...c, day: v }))}
-                    placeholder="Day number"
-                    placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
-                    keyboardType="number-pad"
-                    style={[styles.formInput, styles.formHalf, isDark && styles.darkFormInput]}
-                  />
-                  <TextInput
-                    value={form.weekday}
-                    onChangeText={(v) => setForm((c) => ({ ...c, weekday: v }))}
-                    placeholder="Custom day name"
-                    placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
-                    style={[styles.formInput, styles.formHalf, isDark && styles.darkFormInput]}
-                  />
-                </View>
-                <TextInput
-                  value={form.title}
-                  onChangeText={(v) => setForm((c) => ({ ...c, title: v }))}
-                  placeholder="Meditation title"
-                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
-                  style={[styles.formInput, isDark && styles.darkFormInput]}
-                />
-                <TextInput
-                  value={form.scriptureReference}
-                  onChangeText={(v) => setForm((c) => ({ ...c, scriptureReference: v }))}
-                  placeholder="Scripture reference"
-                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
-                  style={[styles.formInput, isDark && styles.darkFormInput]}
-                />
-                <TextInput
-                  value={form.scriptureText}
-                  onChangeText={(v) => setForm((c) => ({ ...c, scriptureText: v }))}
-                  placeholder="Scripture text"
-                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
-                  multiline
-                  style={[styles.formInput, styles.formTextArea, isDark && styles.darkFormInput]}
-                />
-                <TextInput
-                  value={form.meditation}
-                  onChangeText={(v) => setForm((c) => ({ ...c, meditation: v }))}
-                  placeholder="Meditation text"
-                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
-                  multiline
-                  style={[styles.formInput, styles.formTextAreaLarge, isDark && styles.darkFormInput]}
-                />
-                <TextInput
-                  value={form.furtherStudies}
-                  onChangeText={(v) => setForm((c) => ({ ...c, furtherStudies: v }))}
-                  placeholder="Further studies, separated by commas"
-                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
-                  style={[styles.formInput, isDark && styles.darkFormInput]}
-                />
-                <TextInput
-                  value={form.wisdom}
-                  onChangeText={(v) => setForm((c) => ({ ...c, wisdom: v }))}
-                  placeholder="Wisdom nugget"
-                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
-                  multiline
-                  style={[styles.formInput, styles.formTextArea, isDark && styles.darkFormInput]}
-                />
-                <TextInput
-                  value={form.declaration}
-                  onChangeText={(v) => setForm((c) => ({ ...c, declaration: v }))}
-                  placeholder="Declaration"
-                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
-                  multiline
-                  style={[styles.formInput, styles.formTextArea, isDark && styles.darkFormInput]}
-                />
-                <Pressable disabled={saving} onPress={saveMeditation} style={[styles.saveButton, saving && styles.disabledButton]}>
-                  <Text style={styles.publishButtonText}>{saving ? 'Saving...' : 'Save meditation'}</Text>
-                </Pressable>
-              </ScrollView>
-            </View>
-          </KeyboardAvoidingView>
-        </Modal>
-
-        {/* Review Day Modal */}
-        <Modal visible={Boolean(reviewingDay)} transparent animationType="slide" onRequestClose={() => setReviewingDay(null)}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={adminExtraStyles.modalBackdrop}>
-            <View style={[adminExtraStyles.modalPanel, isDark && styles.darkCard]}>
-              <ScrollView style={adminExtraStyles.modalScroll} contentContainerStyle={adminExtraStyles.modalContent}>
-                <View style={styles.composerHeader}>
-                  <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>Review day {reviewingDay?.day_number}</Text>
-                  <Pressable onPress={() => setReviewingDay(null)}>
-                    <AppIcon name="xmark" size={18} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />
-                  </Pressable>
-                </View>
-                <TextInput value={reviewDayForm.title} onChangeText={(v) => setReviewDayForm((c) => ({ ...c, title: v }))} placeholder="Meditation title" placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} style={[styles.formInput, isDark && styles.darkFormInput]} />
-                <TextInput value={reviewDayForm.scriptureReference} onChangeText={(v) => setReviewDayForm((c) => ({ ...c, scriptureReference: v }))} placeholder="Scripture reference" placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} style={[styles.formInput, isDark && styles.darkFormInput]} />
-                <TextInput value={reviewDayForm.scriptureText} onChangeText={(v) => setReviewDayForm((c) => ({ ...c, scriptureText: v }))} placeholder="Scripture text" placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} multiline style={[styles.formInput, styles.formTextArea, isDark && styles.darkFormInput]} />
-                <TextInput value={reviewDayForm.meditation} onChangeText={(v) => setReviewDayForm((c) => ({ ...c, meditation: v }))} placeholder="Meditation text" placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} multiline style={[styles.formInput, styles.formTextAreaLarge, isDark && styles.darkFormInput]} />
-                <TextInput value={reviewDayForm.furtherStudies} onChangeText={(v) => setReviewDayForm((c) => ({ ...c, furtherStudies: v }))} placeholder="Further studies, separated by commas" placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} style={[styles.formInput, isDark && styles.darkFormInput]} />
-                <TextInput value={reviewDayForm.wisdom} onChangeText={(v) => setReviewDayForm((c) => ({ ...c, wisdom: v }))} placeholder="Wisdom nugget" placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} multiline style={[styles.formInput, styles.formTextArea, isDark && styles.darkFormInput]} />
-                <TextInput value={reviewDayForm.declaration} onChangeText={(v) => setReviewDayForm((c) => ({ ...c, declaration: v }))} placeholder="Declaration" placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} multiline style={[styles.formInput, styles.formTextArea, isDark && styles.darkFormInput]} />
-                <Pressable disabled={saving} onPress={saveDayReview} style={[styles.saveButton, saving && styles.disabledButton]}>
-                  <Text style={styles.publishButtonText}>{saving ? 'Saving...' : 'Save reviewed day'}</Text>
-                </Pressable>
-              </ScrollView>
-            </View>
-          </KeyboardAvoidingView>
-        </Modal>
-
-        {/* Review Import Modal */}
-        {reviewingImport ? (
-          <Modal visible={Boolean(reviewingImport)} transparent animationType="slide" onRequestClose={() => setReviewingImport(null)}>
-            <View style={adminExtraStyles.modalBackdrop}>
-              <View style={[adminExtraStyles.modalPanel, isDark && styles.darkCard]}>
-                <ScrollView style={adminExtraStyles.modalScroll} contentContainerStyle={adminExtraStyles.modalContent}>
-                  <View style={styles.composerHeader}>
-                    <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>Review import</Text>
-                    <Pressable onPress={() => setReviewingImport(null)}>
-                      <AppIcon name="xmark" size={18} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />
-                    </Pressable>
-                  </View>
-                  <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>
-                    {reviewingImport.source_name} · {reviewingImport.extracted_data?.days_found ?? reviewingImport.extracted_data?.days?.length ?? 0} records · {reviewingImport.extracted_data?.review_count ?? 0} need review
-                  </Text>
-                  <Text style={[adminExtraStyles.panelHeading, isDark && styles.darkInk]}>Choose a draft edition</Text>
-                  {editions.filter((e) => e.status !== 'published').map((e) => (
-                    <Pressable key={e.id} disabled={saving} onPress={() => approveImport(e.id)} style={[adminExtraStyles.panelButton, isDark && styles.darkCard]}>
-                      <AppIcon name="arrow.down.doc" size={16} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
-                      <Text style={[adminExtraStyles.panelButtonText, isDark && styles.darkInk]}>Import into {e.title}</Text>
-                    </Pressable>
-                  ))}
-                  <Text style={[adminExtraStyles.panelHeading, isDark && styles.darkInk]}>Extracted days</Text>
-                  {(reviewingImport.extracted_data?.days ?? []).map((day) => (
-                    <Pressable key={`${day.day_number}-${day.title}`} onPress={() => openDayReview(day)} style={[adminExtraStyles.activityRow, isDark && { borderColor: DewDesign.colors.darkLine }]}>
-                      <Text style={[styles.detailText, isDark && styles.darkMuted]}>Day {day.day_number}</Text>
-                      <Text style={[styles.detailText, isDark && styles.darkMuted, day.needs_review && styles.warningText]} numberOfLines={1}>
-                        {day.title}
-                      </Text>
-                      {day.needs_review ? <AppIcon name="pencil" size={14} tintColor={DewDesign.colors.terracotta} /> : <AppIcon name="chevron.right" size={14} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />}
-                    </Pressable>
-                  ))}
-                </ScrollView>
-              </View>
-            </View>
-          </Modal>
-        ) : null}
-
-        {/* Delete PDF Confirmation Modal */}
-        <Modal visible={Boolean(deletingPdf)} transparent animationType="fade" onRequestClose={() => setDeletingPdf(null)}>
-          <Pressable style={adminExtraStyles.dialogBackdrop} onPress={() => setDeletingPdf(null)}>
-            <Pressable style={[adminExtraStyles.dialog, isDark && styles.darkCard]} onPress={(e) => e.stopPropagation()}>
-              <Text style={[adminExtraStyles.dialogTitle, isDark && styles.darkInk]}>Delete PDF?</Text>
-              <Text style={[adminExtraStyles.dialogBody, isDark && styles.darkMuted]}>{deletingPdf?.source_name} will be removed from private storage.</Text>
-              <View style={adminExtraStyles.dialogActions}>
-                <Pressable onPress={() => setDeletingPdf(null)} style={adminExtraStyles.dialogCancel}>
-                  <Text style={adminExtraStyles.dialogCancelText}>Cancel</Text>
-                </Pressable>
-                <Pressable onPress={deletePdf} style={adminExtraStyles.dialogDelete}>
-                  <Text style={adminExtraStyles.dialogDeleteText}>Delete</Text>
-                </Pressable>
-              </View>
-            </Pressable>
-          </Pressable>
-        </Modal>
-
-        {/* JSON Bulk Import Modal */}
-        <Modal visible={showJsonModal} transparent animationType="slide" onRequestClose={() => setShowJsonModal(false)}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={adminExtraStyles.modalBackdrop}>
-            <View style={[adminExtraStyles.modalPanel, isDark && styles.darkCard]}>
-              <ScrollView style={adminExtraStyles.modalScroll} contentContainerStyle={adminExtraStyles.modalContent}>
-                <View style={styles.composerHeader}>
-                  <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>JSON Bulk Import</Text>
-                  <Pressable onPress={() => setShowJsonModal(false)}>
-                    <AppIcon name="xmark" size={18} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />
-                  </Pressable>
-                </View>
-                <Text style={[styles.fieldLabel, isDark && styles.darkMuted]}>
-                  Paste JSON array of devotions (with day, title, scripture, meditation fields):
-                </Text>
-                <TextInput
-                  value={jsonInput}
-                  onChangeText={setJsonInput}
-                  placeholder={`[{"day": 1, "title": "Day 1", "scripture": "John 3:16", "meditation": "..."}]`}
-                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
-                  multiline
-                  style={[styles.formInput, styles.formTextAreaLarge, isDark && styles.darkFormInput]}
-                />
-                <Pressable disabled={saving} onPress={importBulkJson} style={[styles.saveButton, saving && styles.disabledButton]}>
-                  <Text style={styles.publishButtonText}>{saving ? 'Importing...' : 'Bulk Import Devotions'}</Text>
                 </Pressable>
               </ScrollView>
             </View>
