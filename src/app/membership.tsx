@@ -208,21 +208,47 @@ export default function MembershipScreen() {
               <View style={[styles.statusCard, isDark && styles.darkCard, isPremium && styles.statusCardPremium]}>
                 <View style={styles.statusBadgeRow}>
                   <View style={[styles.statusBadge, isPremium && styles.statusBadgeActive]}>
-                    <Text style={styles.statusBadgeText}>
-                      {isPremium ? 'PREMIUM' : t(language, 'freeEdition')}
+                    <Text style={[styles.statusBadgeText, isPremium && styles.statusBadgeActiveText]}>
+                      {isPremium ? 'PREMIUM MEMBER' : t(language, 'freeEdition')}
                     </Text>
                   </View>
-                  {session?.user.email ? (
-                    <Text style={[styles.userEmail, isDark && styles.darkMuted]} numberOfLines={1}>
-                      {session.user.email}
-                    </Text>
-                  ) : null}
                 </View>
-                <Text style={[styles.statusDesc, isDark && styles.darkBody]}>
-                  {isPremium
-                    ? t(language, 'activeUntil').replace('{date}', expiresAt ?? 'July 31, 2026')
-                    : t(language, 'freeDaysNote')}
-                </Text>
+
+                <View style={styles.statusInfoGrid}>
+                  {/* Account Email */}
+                  <View style={styles.statusInfoRow}>
+                    <Text style={[styles.statusInfoLabel, isPremium && styles.statusInfoLabelPremium, isDark && !isPremium && styles.darkMuted]}>
+                      {language === 'fr' ? 'Courriel :' : 'Account Email:'}
+                    </Text>
+                    <Text style={[styles.statusInfoValue, isPremium && styles.statusInfoValuePremium, isDark && !isPremium && styles.darkInk]} numberOfLines={1}>
+                      {session?.user.email ?? (language === 'fr' ? 'Invité' : 'Guest / Signed Out')}
+                    </Text>
+                  </View>
+
+                  {/* Account Status */}
+                  <View style={styles.statusInfoRow}>
+                    <Text style={[styles.statusInfoLabel, isPremium && styles.statusInfoLabelPremium, isDark && !isPremium && styles.darkMuted]}>
+                      {language === 'fr' ? 'Statut :' : 'Account Status:'}
+                    </Text>
+                    <Text style={[styles.statusInfoValue, isPremium && styles.statusInfoValuePremium, isDark && !isPremium && styles.darkInk]}>
+                      {isPremium
+                        ? (language === 'fr' ? 'Abonnement Actif' : 'Active Subscription')
+                        : (language === 'fr' ? 'Édition Gratuite (Jours 1–3)' : 'Free Access (Days 1–3)')}
+                    </Text>
+                  </View>
+
+                  {/* Membership Duration / Expiration */}
+                  <View style={styles.statusInfoRow}>
+                    <Text style={[styles.statusInfoLabel, isPremium && styles.statusInfoLabelPremium, isDark && !isPremium && styles.darkMuted]}>
+                      {language === 'fr' ? 'Échéance :' : 'Duration / Expires:'}
+                    </Text>
+                    <Text style={[styles.statusInfoValue, isPremium && styles.statusInfoValuePremium, isDark && !isPremium && styles.darkInk]}>
+                      {isPremium
+                        ? (expiresAt ? `${language === 'fr' ? 'Valide jusqu’au' : 'Valid until'} ${expiresAt}` : (language === 'fr' ? 'Accès Premium Actif' : 'Active Premium Access'))
+                        : (language === 'fr' ? 'Accès Gratuit Permanent' : 'Ongoing Free Access')}
+                    </Text>
+                  </View>
+                </View>
               </View>
 
               {/* Account Balance Card */}
@@ -387,10 +413,17 @@ const styles = StyleSheet.create({
   darkInk: { color: DewDesign.colors.darkInk },
   darkBody: { color: DewDesign.colors.darkBody },
   darkMuted: { color: DewDesign.colors.darkMuted },
-  statusBadgeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  statusBadgeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
   statusBadge: { backgroundColor: DewDesign.colors.surfaceMuted, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
   statusBadgeActive: { backgroundColor: DewDesign.colors.terracotta },
   statusBadgeText: { color: DewDesign.colors.terracotta, fontSize: 10, fontWeight: '900', letterSpacing: 1 },
+  statusBadgeActiveText: { color: DewDesign.colors.white },
+  statusInfoGrid: { marginTop: 10, gap: 8 },
+  statusInfoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  statusInfoLabel: { fontSize: 12, color: DewDesign.colors.muted, fontWeight: '600' },
+  statusInfoLabelPremium: { color: '#C9D8C7' },
+  statusInfoValue: { fontSize: 13, color: DewDesign.colors.ink, fontWeight: '800', textAlign: 'right', flex: 1, marginLeft: 8 },
+  statusInfoValuePremium: { color: '#FFFFFF' },
   userEmail: { color: DewDesign.colors.muted, fontSize: 12, fontWeight: '600' },
   statusDesc: { color: DewDesign.colors.body, fontSize: 13, lineHeight: 19 },
   card: { backgroundColor: DewDesign.colors.surface, borderRadius: DewDesign.radius.card, padding: 18, marginBottom: 14, borderWidth: 1, borderColor: DewDesign.colors.line },
