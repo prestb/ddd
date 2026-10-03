@@ -114,6 +114,7 @@ export default function AddFundsScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [transId, setTransId] = useState<string | null>(null);
   const [updatedBalance, setUpdatedBalance] = useState<number | null>(null);
+  const [verifiedAmount, setVerifiedAmount] = useState<number | null>(null);
 
   const isCheckingRef = useRef(false);
   const amount = customAmountText ? (parseInt(customAmountText, 10) || 0) : selectedAmount;
@@ -172,6 +173,7 @@ export default function AddFundsScreen() {
         const freshBalance = session?.user.id
           ? await walletFundingService.getUserBalance(session.user.id)
           : null;
+        if (result.amount) setVerifiedAmount(result.amount);
         setUpdatedBalance(freshBalance ?? (result.amount || amount));
         setErrorMessage(null);
         setStep('success');
@@ -442,7 +444,7 @@ export default function AddFundsScreen() {
               <View style={styles.receiptBox}>
                 <View style={styles.receiptRow}>
                   <Text style={styles.receiptLabel}>{language === 'fr' ? 'Rechargé' : 'Added'}</Text>
-                  <Text style={styles.receiptAmount}>{`+${amount.toLocaleString()} XAF`}</Text>
+                  <Text style={styles.receiptAmount}>{`+${(verifiedAmount ?? amount).toLocaleString()} XAF`}</Text>
                 </View>
                 <View style={styles.receiptRow}>
                   <Text style={styles.receiptLabel}>{t(language, 'updatedBalance')}</Text>

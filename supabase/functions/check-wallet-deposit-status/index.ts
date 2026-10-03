@@ -123,9 +123,31 @@ Deno.serve(async (request) => {
     });
 
     const providerStatus = fapshiData?.status ?? fapshiData?.paymentStatus;
-    const providerAmount = Number(fapshiData?.amount) || paymentTx.amount;
 
     if (providerStatus === 'SUCCESSFUL' || providerStatus === 'SUCCESS') {
+      const rawAmount = fapshiData?.amount;
+      const providerAmount = typeof rawAmount === 'number'
+        ? rawAmount
+        : typeof rawAmount === 'string' && /^\d+$/.test(rawAmount.trim())
+        ? parseInt(rawAmount.trim(), 10)
+        : null;
+
+      if (providerAmount === null || !Number.isInteger(providerAmount) || providerAmount <= 0) {
+        console.error(`check-wallet-deposit-status: Provider returned SUCCESSFUL but missing/invalid amount: ${rawAmount}`);
+        return json({
+          error: 'PROVIDER_AMOUNT_MISSING',
+          message: 'Payment provider did not return a valid payment amount for verification.',
+        }, 400);
+      }
+
+      if (providerAmount !== paymentTx.amount) {
+        console.error(`check-wallet-deposit-status: Amount mismatch - Provider: ${providerAmount}, Ledger: ${paymentTx.amount}`);
+        return json({
+          error: 'AMOUNT_MISMATCH',
+          message: 'Provider transaction amount does not match the expected deposit amount.',
+        }, 400);
+      }
+
       console.log('WALLET_FULFILLMENT_RPC_REQUEST', {
         providerTransactionId: targetTransId,
         providerAmount,
