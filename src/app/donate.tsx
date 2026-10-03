@@ -22,6 +22,7 @@ export default function DonateScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [step, setStep] = useState<DonationStep>('form');
   const [transId, setTransId] = useState<string | null>(null);
+  const [verificationToken, setVerificationToken] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const isDark = themeMode === 'dark';
 
@@ -61,6 +62,9 @@ export default function DonateScreen() {
       }
 
       setTransId(data.transId);
+      if (data.verificationToken) {
+        setVerificationToken(data.verificationToken);
+      }
       setStep('pending');
     } catch (err) {
       Alert.alert(t(language, 'donate'), err instanceof Error ? err.message : t(language, 'donationUnavailable'));
@@ -76,7 +80,7 @@ export default function DonateScreen() {
 
     try {
       const { data, error } = await supabase.functions.invoke('check-donation-status', {
-        body: { transId },
+        body: { transId, verificationToken },
       });
 
       if (error || !data?.status) {

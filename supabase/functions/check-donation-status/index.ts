@@ -25,6 +25,7 @@ Deno.serve(async (request) => {
 
     const body = await request.json();
     const transId = typeof body?.transId === 'string' ? body.transId.trim() : '';
+    const verificationToken = typeof body?.verificationToken === 'string' ? body.verificationToken.trim() : null;
 
     if (!transId) {
       return json({ error: 'MISSING_TRANS_ID', message: 'Transaction ID is required to verify status.' }, 400);
@@ -45,20 +46,32 @@ Deno.serve(async (request) => {
 
     const admin = createClient(supabaseUrl, serviceKey);
 
-    // 1. Locate donation row by transaction_id
+    // 1. Locate donation row with strict ownership / token verification
     let donationQuery = admin
       .from('donations')
-      .select('id, user_id, amount, status, transaction_id, external_id')
+      .select('id, user_id, amount, status, transaction_id, external_id, metadata')
       .or(`transaction_id.eq.${transId},external_id.eq.${transId}`);
 
     if (userId) {
+      // Authenticated user: Scope query to authenticated user ID
       donationQuery = donationQuery.eq('user_id', userId);
+    } else {
+      // Anonymous user: Require non-guessable verification token
+      if (!verificationToken) {
+        return json({ error: 'UNAUTHORIZED', message: 'Verification token required for anonymous donation status check.' }, 401);
+      }
+      donationQuery = donationQuery.eq('metadata->>verification_token', verificationToken);
     }
 
     const { data: donation, error: selectError } = await donationQuery.maybeSingle();
 
-    if (selectError || !donation) {
-      return json({ error: 'DONATION_NOT_FOUND', message: 'The donation transaction could not be found.' }, 404);
+    if (selectError) {
+      console.error('check-donation-status: Database query error', selectError);
+      return json({ error: 'DATABASE_ERROR', message: 'Database query failed.' }, 500);
+    }
+
+    if (!donation) {
+      return json({ error: 'DONATION_NOT_FOUND', message: 'The donation transaction could not be found or authorization failed.' }, 404);
     }
 
     if (donation.status === 'successful') {
@@ -78,7 +91,8 @@ Deno.serve(async (request) => {
     });
 
     if (!fapshiRes.ok) {
-      console.error(`check-donation-status: Fapshi status HTTP ${fapshiRes.status}`);
+      const rawErr = await fapshiRes.text();
+      console.error(`check-donation-status: Fapshi status HTTP ${fapshiRes.status} - ${rawErr}`);
       return json({ error: 'PAYMENT_PROVIDER_STATUS_FAILED', message: 'Payment provider status check failed.' }, 502);
     }
 
@@ -89,10 +103,15 @@ Deno.serve(async (request) => {
     const providerStatus = fapshiData?.status ?? fapshiData?.paymentStatus;
 
     if (providerStatus === 'SUCCESSFUL' || providerStatus === 'SUCCESS') {
-      await admin
+      const { error: updateError } = await admin
         .from('donations')
         .update({ status: 'successful', updated_at: new Date().toISOString() })
         .eq('id', donation.id);
+
+      if (updateError) {
+        console.error('check-donation-status: Failed to update donation status to successful', updateError);
+        return json({ error: 'DONATION_UPDATE_FAILED', message: 'Failed to update donation status.' }, 500);
+      }
 
       return json({
         status: 'successful',
@@ -100,10 +119,15 @@ Deno.serve(async (request) => {
         transId: targetTransId,
       });
     } else if (providerStatus === 'FAILED' || providerStatus === 'EXPIRED' || providerStatus === 'CANCELLED') {
-      await admin
+      const { error: updateError } = await admin
         .from('donations')
         .update({ status: 'failed', updated_at: new Date().toISOString() })
         .eq('id', donation.id);
+
+      if (updateError) {
+        console.error('check-donation-status: Failed to update donation status to failed', updateError);
+        return json({ error: 'DONATION_UPDATE_FAILED', message: 'Failed to update donation status.' }, 500);
+      }
 
       return json({
         status: 'failed',

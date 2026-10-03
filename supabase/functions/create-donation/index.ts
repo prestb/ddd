@@ -72,6 +72,7 @@ Deno.serve(async (request) => {
     }
 
     const externalId = `donation-${crypto.randomUUID()}`;
+    const verificationToken = crypto.randomUUID();
     const admin = createClient(supabaseUrl, serviceKey);
 
     // 1. Record pending donation row FIRST before provider Direct Pay request
@@ -82,6 +83,12 @@ Deno.serve(async (request) => {
         external_id: externalId,
         amount,
         status: 'pending',
+        metadata: {
+          verification_token: verificationToken,
+          phone: normalizedPhone,
+          provider_method: rawProvider,
+          email: userEmail,
+        },
       })
       .select('id')
       .single();
@@ -116,7 +123,7 @@ Deno.serve(async (request) => {
 
       await admin
         .from('donations')
-        .update({ status: 'failed' })
+        .update({ status: 'failed', metadata: { error: providerMessage, verification_token: verificationToken } })
         .eq('id', pendingDonation.id);
 
       throw new Error(`Fapshi HTTP ${response.status}: ${providerMessage}`);
@@ -125,13 +132,23 @@ Deno.serve(async (request) => {
     // 3. Update donation row with provider transaction_id
     await admin
       .from('donations')
-      .update({ transaction_id: result.transId })
+      .update({
+        transaction_id: result.transId,
+        metadata: {
+          verification_token: verificationToken,
+          phone: normalizedPhone,
+          provider_method: rawProvider,
+          email: userEmail,
+          direct_pay_response: result,
+        },
+      })
       .eq('id', pendingDonation.id);
 
     return json({
       success: true,
       transId: result.transId,
       externalId,
+      verificationToken,
       amount,
       phone: normalizedPhone,
     });
