@@ -4,7 +4,7 @@ import DailyDewHeader from '@/components/daily-dew-header';
 import { DewDesign } from '@/constants/design';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/auth-context';
 import { useSettings } from '@/context/settings-context';
@@ -20,21 +20,29 @@ export default function MembershipScreen() {
 
   const [selectedPlan, setSelectedPlan] = useState<PlanChoice>('annual');
   const [autoRenew, setAutoRenew] = useState(true);
-  const [balance, setBalance] = useState(0); // Authoritative account balance XAF (starts at 0)
+  const [balance, setBalance] = useState(0); // Authoritative account balance XAF
   const [isPremium, setIsPremium] = useState(false); // Premium active status
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  const [loadingAccount, setLoadingAccount] = useState(true);
+  const [accountError, setAccountError] = useState<string | null>(null);
+  const [updatingAutoRenew, setUpdatingAutoRenew] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   // Fetch authoritative user wallet balance & subscription state
   useEffect(() => {
-    if (!session || !supabase) return;
+    if (!session || !supabase) {
+      setLoadingAccount(false);
+      return;
+    }
     const client = supabase;
     const userId = session.user.id;
     let cancelled = false;
 
     async function loadAccountData() {
       try {
+        setLoadingAccount(true);
+        setAccountError(null);
         const [{ data: walletData }, { data: subData }] = await Promise.all([
           client.from('wallets').select('balance').eq('user_id', userId).maybeSingle(),
           client.from('subscriptions').select('status, expires_at, auto_renew').eq('user_id', userId).maybeSingle(),
@@ -50,7 +58,11 @@ export default function MembershipScreen() {
           }
         }
       } catch {
-        // Fallback
+        if (!cancelled) {
+          setAccountError(language === 'fr' ? 'Impossible de charger les détails du compte.' : 'Could not load account details.');
+        }
+      } finally {
+        if (!cancelled) setLoadingAccount(false);
       }
     }
 
@@ -123,18 +135,39 @@ export default function MembershipScreen() {
   };
 
   const handleToggleAutoRenew = async () => {
-    const nextVal = !autoRenew;
-    setAutoRenew(nextVal);
+    if (updatingAutoRenew || !session || !supabase) return;
+    const targetVal = !autoRenew;
+    setUpdatingAutoRenew(true);
+    setMessage(null);
 
-    if (session && supabase) {
-      try {
-        await supabase.rpc('update_auto_renew_preference', {
-          p_user_id: session.user.id,
-          p_auto_renew: nextVal,
-        });
-      } catch {
-        // Fallback
+    try {
+      const { data, error } = await supabase.functions.invoke('update-auto-renew-preference', {
+        body: { autoRenew: targetVal },
+      });
+
+      if (error || !data?.success) {
+        setMessage(
+          language === 'fr'
+            ? "Impossible de mettre à jour le renouvellement automatique. Veuillez réessayer."
+            : "We couldn't update auto-renewal. Please try again."
+        );
+        return;
       }
+
+      setAutoRenew(Boolean(data.autoRenew));
+      setMessage(
+        language === 'fr'
+          ? "Préférence de renouvellement automatique mise à jour."
+          : "Auto-renewal preference updated."
+      );
+    } catch {
+      setMessage(
+        language === 'fr'
+          ? "Impossible de mettre à jour le renouvellement automatique. Veuillez réessayer."
+          : "We couldn't update auto-renewal. Please try again."
+      );
+    } finally {
+      setUpdatingAutoRenew(false);
     }
   };
 
@@ -152,52 +185,66 @@ export default function MembershipScreen() {
             <Text style={[styles.backText, isDark && styles.darkInk]}>{t(language, 'back')}</Text>
           </Pressable>
 
-
           <Text style={[styles.title, isDark && styles.darkInk]}>{t(language, 'dailyDewPremium')}</Text>
           <Text style={[styles.subtitle, isDark && styles.darkBody]}>{t(language, 'premiumSubtitle')}</Text>
 
-          {/* Membership Status Card */}
-          <View style={[styles.statusCard, isDark && styles.darkCard, isPremium && styles.statusCardPremium]}>
-            <View style={styles.statusBadgeRow}>
-              <View style={[styles.statusBadge, isPremium && styles.statusBadgeActive]}>
-                <Text style={styles.statusBadgeText}>
-                  {isPremium ? 'PREMIUM' : t(language, 'freeEdition')}
+          {loadingAccount ? (
+            <View style={[styles.card, isDark && styles.darkCard, { alignItems: 'center', paddingVertical: 24 }]}>
+              <ActivityIndicator size="small" color={DewDesign.colors.forest} />
+              <Text style={[styles.cardBodyText, isDark && styles.darkMuted, { marginTop: 8 }]}>
+                {language === 'fr' ? 'Chargement des détails du compte...' : 'Loading account details...'}
+              </Text>
+            </View>
+          ) : accountError ? (
+            <View style={[styles.card, isDark && styles.darkCard, { alignItems: 'center', paddingVertical: 18 }]}>
+              <Text style={[styles.messageText, { marginTop: 0 }]}>{accountError}</Text>
+            </View>
+          ) : (
+            <>
+              {/* Membership Status Card */}
+              <View style={[styles.statusCard, isDark && styles.darkCard, isPremium && styles.statusCardPremium]}>
+                <View style={styles.statusBadgeRow}>
+                  <View style={[styles.statusBadge, isPremium && styles.statusBadgeActive]}>
+                    <Text style={styles.statusBadgeText}>
+                      {isPremium ? 'PREMIUM' : t(language, 'freeEdition')}
+                    </Text>
+                  </View>
+                  {session?.user.email ? (
+                    <Text style={[styles.userEmail, isDark && styles.darkMuted]} numberOfLines={1}>
+                      {session.user.email}
+                    </Text>
+                  ) : null}
+                </View>
+                <Text style={[styles.statusDesc, isDark && styles.darkBody]}>
+                  {isPremium
+                    ? t(language, 'activeUntil').replace('{date}', expiresAt ?? 'July 31, 2026')
+                    : t(language, 'freeDaysNote')}
                 </Text>
               </View>
-              {session?.user.email ? (
-                <Text style={[styles.userEmail, isDark && styles.darkMuted]} numberOfLines={1}>
-                  {session.user.email}
-                </Text>
-              ) : null}
-            </View>
-            <Text style={[styles.statusDesc, isDark && styles.darkBody]}>
-              {isPremium
-                ? t(language, 'activeUntil').replace('{date}', expiresAt ?? 'July 31, 2026')
-                : t(language, 'freeDaysNote')}
-            </Text>
-          </View>
 
-          {/* Account Balance Card */}
-          <View style={[styles.card, isDark && styles.darkCard]}>
-            <View style={styles.cardHeaderRow}>
-              <View style={styles.cardHeaderIcon}>
-                <SymbolView name="creditcard" size={18} tintColor={DewDesign.colors.terracotta} />
+              {/* Account Balance Card */}
+              <View style={[styles.card, isDark && styles.darkCard]}>
+                <View style={styles.cardHeaderRow}>
+                  <View style={styles.cardHeaderIcon}>
+                    <SymbolView name="creditcard" size={18} tintColor={DewDesign.colors.terracotta} />
+                  </View>
+                  <View style={styles.cardHeaderCopy}>
+                    <Text style={styles.cardLabel}>{t(language, 'accountBalance')}</Text>
+                    <Text style={[styles.balanceValue, isDark && styles.darkInk]}>{`${balance.toLocaleString()} XAF`}</Text>
+                  </View>
+                  <Pressable
+                    onPress={() => router.push('/add-funds' as any)}
+                    accessibilityRole="button"
+                    accessibilityLabel={t(language, 'addFunds')}
+                    style={styles.addFundsBtn}>
+                    <SymbolView name="plus" size={14} tintColor="#FFFFFF" />
+                    <Text style={styles.addFundsText}>{t(language, 'addFunds')}</Text>
+                  </Pressable>
+                </View>
+                <Text style={[styles.cardBodyText, isDark && styles.darkMuted]}>{t(language, 'accountBalanceNote')}</Text>
               </View>
-              <View style={styles.cardHeaderCopy}>
-                <Text style={styles.cardLabel}>{t(language, 'accountBalance')}</Text>
-                <Text style={[styles.balanceValue, isDark && styles.darkInk]}>{`${balance.toLocaleString()} XAF`}</Text>
-              </View>
-              <Pressable
-                onPress={() => router.push('/add-funds' as any)}
-                accessibilityRole="button"
-                accessibilityLabel={t(language, 'addFunds')}
-                style={styles.addFundsBtn}>
-                <SymbolView name="plus" size={14} tintColor="#FFFFFF" />
-                <Text style={styles.addFundsText}>{t(language, 'addFunds')}</Text>
-              </Pressable>
-            </View>
-            <Text style={[styles.cardBodyText, isDark && styles.darkMuted]}>{t(language, 'accountBalanceNote')}</Text>
-          </View>
+            </>
+          )}
 
           {/* Plan Choice Cards */}
           <View style={styles.sectionHeader}>
@@ -258,10 +305,14 @@ export default function MembershipScreen() {
           {/* Auto-Renewal Explanation */}
           <View style={[styles.card, isDark && styles.darkCard, { marginTop: 14 }]}>
             <Pressable
+              disabled={updatingAutoRenew}
               onPress={handleToggleAutoRenew}
               style={styles.toggleRow}
               accessibilityRole="switch"
-              accessibilityState={{ checked: autoRenew }}
+              accessibilityState={{
+                checked: autoRenew,
+                disabled: updatingAutoRenew,
+              }}
               accessibilityLabel={t(language, 'autoRenewTitle')}>
               <View style={styles.toggleCopy}>
                 <Text style={styles.cardLabel}>{t(language, 'autoRenewTitle')}</Text>
@@ -269,9 +320,13 @@ export default function MembershipScreen() {
                   {language === 'fr' ? 'Renouvellement automatique' : 'Auto-renew membership'}
                 </Text>
               </View>
-              <View style={[styles.toggleSwitch, autoRenew && styles.toggleSwitchActive]}>
-                <View style={[styles.toggleKnob, autoRenew && styles.toggleKnobActive]} />
-              </View>
+              {updatingAutoRenew ? (
+                <ActivityIndicator size="small" color={DewDesign.colors.forest} />
+              ) : (
+                <View style={[styles.toggleSwitch, autoRenew && styles.toggleSwitchActive]}>
+                  <View style={[styles.toggleKnob, autoRenew && styles.toggleKnobActive]} />
+                </View>
+              )}
             </Pressable>
             <Text style={[styles.cardBodyText, isDark && styles.darkMuted, { marginTop: 10 }]}>
               {t(language, 'autoRenewExplain')}
