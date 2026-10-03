@@ -103,6 +103,29 @@ Deno.serve(async (request) => {
     const providerStatus = fapshiData?.status ?? fapshiData?.paymentStatus;
 
     if (providerStatus === 'SUCCESSFUL' || providerStatus === 'SUCCESS') {
+      const rawAmount = fapshiData?.amount;
+      const providerAmount = typeof rawAmount === 'number'
+        ? rawAmount
+        : typeof rawAmount === 'string' && /^\d+$/.test(rawAmount.trim())
+        ? parseInt(rawAmount.trim(), 10)
+        : null;
+
+      if (providerAmount === null || !Number.isInteger(providerAmount) || providerAmount <= 0) {
+        console.error(`check-donation-status: Fapshi returned SUCCESSFUL but missing/invalid amount: ${rawAmount}`);
+        return json({
+          error: 'PROVIDER_AMOUNT_MISSING',
+          message: 'Payment provider did not return a valid payment amount for verification.',
+        }, 400);
+      }
+
+      if (providerAmount !== donation.amount) {
+        console.error(`check-donation-status: Amount mismatch - Provider: ${providerAmount}, Ledger: ${donation.amount}`);
+        return json({
+          error: 'AMOUNT_MISMATCH',
+          message: 'Payment amount does not match the expected donation amount.',
+        }, 400);
+      }
+
       const { error: updateError } = await admin
         .from('donations')
         .update({ status: 'successful', updated_at: new Date().toISOString() })
