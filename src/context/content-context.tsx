@@ -4,11 +4,23 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { type Devotion } from '@/data/devotions';
 import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/context/settings-context';
+import { useAuth } from '@/context/auth-context';
 import { getEditionCacheKey, isValidEditionMetadata, validateDevotions } from '@/lib/content-validation';
+
+type EditionMeta = {
+  slug: string;
+  title: string;
+  theme: string;
+  introduction: string;
+  month: number;
+  year: number;
+  access_level?: 'free' | 'premium';
+  isLocked?: boolean;
+};
 
 type ContentContextValue = {
   devotions: Devotion[];
-  edition: { slug: string; title: string; theme: string; introduction: string; month: number; year: number } | null;
+  edition: EditionMeta | null;
   source: 'offline' | 'cloud';
   loading: boolean;
   error: string | null;
@@ -21,6 +33,7 @@ const latestCacheKey = (language: 'en' | 'fr') => `daily-dew-latest-content-v2-$
 
 export function ContentProvider({ children }: PropsWithChildren) {
   const { language } = useSettings();
+  const { session } = useAuth();
   const [devotions, setDevotions] = useState<Devotion[]>([]);
   const [edition, setEdition] = useState<ContentContextValue['edition']>(null);
   const [source, setSource] = useState<'offline' | 'cloud'>('offline');
@@ -28,7 +41,7 @@ export function ContentProvider({ children }: PropsWithChildren) {
   const [error, setError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
 
-  // 1. Instant Cache Hydration on Mount or Language Switch
+  // 1. Instant Cache Hydration on Mount, Language Switch, or Account Session Change
   useEffect(() => {
     let active = true;
     async function hydrateCache() {
@@ -37,8 +50,30 @@ export function ContentProvider({ children }: PropsWithChildren) {
         if (cachedRaw && active) {
           const parsed = JSON.parse(cachedRaw);
           if (parsed?.edition && Array.isArray(parsed?.devotions) && parsed.devotions.length > 0) {
-            setEdition(parsed.edition);
-            setDevotions(parsed.devotions);
+            const isPremiumEdition = parsed.edition.access_level === 'premium';
+            const currentUserId = session?.user?.id ?? null;
+            const cachedUserId = parsed?.cachedUserId ?? null;
+            const isOwnerMatch = Boolean(currentUserId && cachedUserId && currentUserId === cachedUserId);
+
+            // ACCOUNT ISOLATION GUARD:
+            // If cached edition is premium AND (user is signed out OR active session user ID does NOT match cached user ID)
+            if (isPremiumEdition && (!session || !isOwnerMatch)) {
+              setEdition({ ...parsed.edition, isLocked: true });
+              // Strip ALL protected premium body fields from active memory
+              setDevotions(
+                parsed.devotions.map((d: Devotion) => ({
+                  ...d,
+                  meditation: '',
+                  preview: '',
+                  wisdom: '',
+                  declaration: '',
+                  furtherStudies: [],
+                }))
+              );
+            } else {
+              setEdition(parsed.edition);
+              setDevotions(parsed.devotions);
+            }
             setSource('offline');
             setLoading(false);
           }
@@ -49,9 +84,9 @@ export function ContentProvider({ children }: PropsWithChildren) {
     }
     hydrateCache();
     return () => { active = false; };
-  }, [language]);
+  }, [language, session]);
 
-  // 2. Fetch Latest Published Content from Supabase (Silent Sync)
+  // 2. Fetch Latest Published Content from Supabase (Silent Sync & RLS Enforced)
   useEffect(() => {
     let cancelled = false;
 
@@ -65,7 +100,7 @@ export function ContentProvider({ children }: PropsWithChildren) {
       try {
         const { data: publishedEdition, error: editionError } = await client
           .from('editions')
-          .select('id, slug, title, theme, introduction, month, year')
+          .select('id, slug, title, theme, introduction, month, year, access_level')
           .eq('status', 'published')
           .eq('language', language)
           .order('year', { ascending: false })
@@ -77,7 +112,7 @@ export function ContentProvider({ children }: PropsWithChildren) {
         if (!selectedEdition && language !== 'en' && !editionError) {
           const fallback = await client
             .from('editions')
-            .select('id, slug, title, theme, introduction, month, year, language')
+            .select('id, slug, title, theme, introduction, month, year, language, access_level')
             .eq('status', 'published')
             .eq('language', 'en')
             .order('year', { ascending: false })
@@ -125,13 +160,15 @@ export function ContentProvider({ children }: PropsWithChildren) {
           const checked = validateDevotions(nextDevotions);
 
           if (isValidEditionMetadata(metadata) && checked.valid.length > 0) {
-            const cachedEdition = {
+            const cachedEdition: EditionMeta = {
               slug: selectedEdition.slug,
               title: selectedEdition.title,
               theme: selectedEdition.theme,
               introduction: selectedEdition.introduction ?? '',
               month: selectedEdition.month,
               year: selectedEdition.year,
+              access_level: selectedEdition.access_level ?? 'free',
+              isLocked: selectedEdition.access_level === 'premium',
             };
 
             setDevotions(checked.valid);
@@ -139,7 +176,12 @@ export function ContentProvider({ children }: PropsWithChildren) {
             setSource('cloud');
             setError(null);
 
-            const cachePayload = JSON.stringify({ edition: cachedEdition, devotions: checked.valid });
+            const cachePayload = JSON.stringify({
+              edition: cachedEdition,
+              devotions: checked.valid,
+              cachedUserId: session?.user?.id ?? null,
+            });
+
             AsyncStorage.multiSet([
               [contentCacheKey(language, selectedEdition.slug), JSON.stringify(checked.valid)],
               [latestCacheKey(language), cachePayload],
@@ -159,7 +201,7 @@ export function ContentProvider({ children }: PropsWithChildren) {
     loadPublishedContent();
 
     return () => { cancelled = true; };
-  }, [language, reloadToken]);
+  }, [language, reloadToken, session]);
 
   const refresh = useCallback(() => setReloadToken((value) => value + 1), []);
   const value = useMemo(() => ({ devotions, edition, source, loading, error, refresh }), [devotions, edition, source, loading, error, refresh]);

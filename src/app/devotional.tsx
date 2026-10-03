@@ -17,7 +17,7 @@ import { t } from '@/lib/i18n';
 
 export default function DevotionalScreen() {
   const params = useLocalSearchParams<{ day?: string }>();
-  const { devotions } = useContent();
+  const { devotions, edition } = useContent();
   const index = Math.min(Math.max(Number(params.day ?? 0), 0), devotions.length - 1);
   const { language, fontScale, themeMode } = useSettings();
   const isDark = themeMode === 'dark';
@@ -67,17 +67,59 @@ export default function DevotionalScreen() {
     );
   }
 
+  // Premium Locked Guard: Prevent serving protected meditation content to unauthorized clients
+  if (edition?.isLocked) {
+    return (
+      <View style={[styles.screen, isDark && styles.darkScreen]}>
+        <SafeAreaView style={[styles.safeArea, isDark && styles.darkScreen]}>
+          <DailyDewHeader />
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+            <View style={styles.header}>
+              <Pressable onPress={() => router.back()} style={[styles.iconButton, isDark && styles.darkIconButton]} accessibilityRole="button" accessibilityLabel={t(language, 'goBack')}>
+                <SymbolView name="chevron.left" size={18} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.ink} />
+              </Pressable>
+              <Text style={[styles.headerLabel, isDark && styles.darkMuted]}>{t(language, 'premiumBadge')}</Text>
+              <View style={styles.iconButtonPlaceholder} />
+            </View>
+
+            <Text style={styles.date}>{devotion.weekday.toUpperCase()}</Text>
+            <Text style={[styles.title, isDark && styles.darkInk, { fontSize: 33 * fontScale, lineHeight: 40 * fontScale }]}>{devotion.title}</Text>
+
+            <View style={[styles.premiumLockedBox, isDark && styles.darkScriptureCard]}>
+              <View style={styles.premiumIconCircle}>
+                <SymbolView name="sparkles" size={24} tintColor={DewDesign.colors.terracotta} />
+              </View>
+              <Text style={[styles.premiumLockedTitle, isDark && styles.darkInk]}>{t(language, 'premiumRequiredTitle')}</Text>
+              <Text style={[styles.premiumLockedText, isDark && styles.darkMuted]}>{t(language, 'premiumRequiredMsg')}</Text>
+
+              <Pressable
+                onPress={() => router.push('/membership' as any)}
+                style={({ pressed }) => [styles.explorePremiumBtn, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel={t(language, 'explorePremium')}>
+                <Text style={styles.explorePremiumText}>{t(language, 'explorePremium')}</Text>
+                <SymbolView name="arrow.right" size={16} tintColor="#FFFFFF" />
+              </Pressable>
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.screen, isDark && styles.darkScreen]}>
       <SafeAreaView style={[styles.safeArea, isDark && styles.darkScreen]}>
         <DailyDewHeader />
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
-            <Pressable onPress={() => router.back()} style={[styles.iconButton, isDark && styles.darkIconButton]} accessibilityLabel="Go back">
+            <Pressable onPress={() => router.back()} style={[styles.iconButton, isDark && styles.darkIconButton]} accessibilityRole="button" accessibilityLabel={t(language, 'goBack')}>
               <SymbolView name="chevron.left" size={18} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.ink} />
             </Pressable>
-            <Text style={[styles.headerLabel, isDark && styles.darkMuted]}>DAY {devotion.day} OF {devotions.length}</Text>
-            <Pressable onPress={() => toggleBookmark(index)} style={[styles.iconButton, isDark && styles.darkIconButton]} accessibilityLabel="Bookmark meditation">
+            <Text style={[styles.headerLabel, isDark && styles.darkMuted]}>
+              {`${t(language, 'dayOf')} ${devotion.day} / ${devotions.length}`}
+            </Text>
+            <Pressable onPress={() => toggleBookmark(index)} style={[styles.iconButton, isDark && styles.darkIconButton]} accessibilityRole="button" accessibilityLabel={isBookmarked ? t(language, 'removeBookmark') : t(language, 'bookmarkMeditation')}>
               <SymbolView name={isBookmarked ? 'bookmark.fill' : 'bookmark'} size={18} tintColor={isBookmarked ? DewDesign.colors.terracotta : (isDark ? DewDesign.colors.darkInk : DewDesign.colors.ink)} />
             </Pressable>
           </View>
@@ -90,11 +132,11 @@ export default function DevotionalScreen() {
           <Text style={[styles.title, isDark && styles.darkInk, { fontSize: 33 * fontScale, lineHeight: 40 * fontScale }]}>{devotion.title}</Text>
 
           {/* Interactive Scripture Card */}
-          <Pressable onPress={() => setScriptureModalVisible(true)} style={[styles.scriptureCard, isDark && styles.darkScriptureCard]}>
+          <Pressable onPress={() => setScriptureModalVisible(true)} style={[styles.scriptureCard, isDark && styles.darkScriptureCard]} accessibilityRole="button" accessibilityLabel={t(language, 'scriptureCard')}>
             <View style={styles.scriptureHeading}>
               <SymbolView name="book.closed" size={15} tintColor={DewDesign.colors.terracotta} />
               <Text style={styles.scriptureLabel}>{t(language, 'scripture')}</Text>
-              <Text style={styles.tapToReadBadge}>{language === 'fr' ? 'Appuyer pour lire' : 'Tap to read full passage'}</Text>
+              <Text style={styles.tapToReadBadge}>{t(language, 'tapToReadFullPassage')}</Text>
             </View>
             <Text style={[styles.scripture, isDark && styles.darkScripture]}>{devotion.scripture}</Text>
           </Pressable>
@@ -123,7 +165,7 @@ export default function DevotionalScreen() {
           <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{t(language, 'furtherStudies')}</Text>
           <View style={styles.studyRow}>
             {devotion.furtherStudies.map((study) => (
-              <Pressable key={study} onPress={() => setScriptureModalVisible(true)} style={styles.studyPill}>
+              <Pressable key={study} onPress={() => setScriptureModalVisible(true)} style={styles.studyPill} accessibilityRole="button" accessibilityLabel={study}>
                 <Text style={styles.studyText}>{study}</Text>
               </Pressable>
             ))}
@@ -159,12 +201,12 @@ export default function DevotionalScreen() {
           </View>
 
           <View style={styles.actionRow}>
-            <Pressable onPress={() => setShareCardVisible(true)} style={[styles.actionButton, styles.cardShareButton]}>
+            <Pressable onPress={() => setShareCardVisible(true)} style={[styles.actionButton, styles.cardShareButton]} accessibilityRole="button" accessibilityLabel={t(language, 'createGraphicCard')}>
               <SymbolView name="photo" size={16} tintColor="#FFFFFF" />
-              <Text style={styles.cardShareButtonText}>{language === 'fr' ? 'Créer une Carte Visuale' : 'Create Graphic Card'}</Text>
+              <Text style={styles.cardShareButtonText}>{t(language, 'createGraphicCard')}</Text>
             </Pressable>
 
-            <Pressable onPress={shareMoment} style={[styles.actionButton, styles.secondaryShareBtn]}>
+            <Pressable onPress={shareMoment} style={[styles.actionButton, styles.secondaryShareBtn]} accessibilityRole="button" accessibilityLabel={t(language, 'shareMoment')}>
               <SymbolView name="square.and.arrow.up" size={16} tintColor={DewDesign.colors.forest} />
               <Text style={styles.secondaryShareText}>{t(language, 'shareMoment')}</Text>
             </Pressable>
@@ -172,6 +214,8 @@ export default function DevotionalScreen() {
 
           <Pressable
             onPress={() => toggleCompleted(index)}
+            accessibilityRole="button"
+            accessibilityLabel={isComplete ? t(language, 'meditationComplete') : t(language, 'completeMeditation')}
             style={({ pressed }) => [styles.completeButton, isComplete && styles.completeButtonDone, pressed && styles.pressed]}>
             <SymbolView name={isComplete ? 'checkmark' : 'checkmark.circle'} size={18} tintColor="#FFFFFF" />
             <Text style={styles.completeButtonText}>{isComplete ? t(language, 'meditationComplete') : t(language, 'completeMeditation')}</Text>
@@ -229,6 +273,7 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: DewDesign.spacing.screen, paddingTop: 10, paddingBottom: 110 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
   iconButton: { width: 38, height: 38, borderRadius: 19, backgroundColor: DewDesign.colors.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
+  iconButtonPlaceholder: { width: 38, height: 38 },
   darkIconButton: { backgroundColor: DewDesign.colors.darkSurfaceMuted },
   headerLabel: { color: DewDesign.colors.muted, fontSize: 11, fontWeight: '800', letterSpacing: 1.3 },
   progressTrack: { height: 5, borderRadius: 3, backgroundColor: DewDesign.colors.surfaceMuted, overflow: 'hidden', marginBottom: 20 },
@@ -275,5 +320,11 @@ const styles = StyleSheet.create({
   dayNavDisabled: { backgroundColor: DewDesign.colors.surfaceMuted },
   dayNavText: { color: DewDesign.colors.forest, fontSize: 13, fontWeight: '800' },
   dayNavTextDisabled: { color: DewDesign.colors.muted },
+  premiumLockedBox: { backgroundColor: DewDesign.colors.terracottaSoft, borderRadius: DewDesign.radius.card, padding: 22, marginTop: 20, alignItems: 'center' },
+  premiumIconCircle: { width: 52, height: 52, borderRadius: 26, backgroundColor: DewDesign.colors.surface, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  premiumLockedTitle: { color: DewDesign.colors.ink, fontFamily: 'serif', fontSize: 20, fontWeight: '700', textAlign: 'center' },
+  premiumLockedText: { color: DewDesign.colors.body, fontSize: 13, lineHeight: 20, textAlign: 'center', marginTop: 8 },
+  explorePremiumBtn: { height: 48, borderRadius: DewDesign.radius.control, backgroundColor: DewDesign.colors.forest, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 18 },
+  explorePremiumText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
   pressed: { opacity: 0.82 },
 });

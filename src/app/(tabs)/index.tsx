@@ -15,7 +15,7 @@ import FadeIn from '@/components/fade-in';
 import ContentStatus from '@/components/content-status';
 
 export default function HomeScreen() {
-  const { language, reminderEnabled, themeMode } = useSettings();
+  const { language, themeMode } = useSettings();
   const isDark = themeMode === 'dark';
   const { devotions, edition, source, error: contentError, loading: contentLoading, refresh: refreshContent } = useContent();
 
@@ -33,6 +33,16 @@ export default function HomeScreen() {
   const completed = hasDevotions && completedDays.includes(todayIndex);
   const [currentHour] = useState(() => new Date().getHours());
 
+  // Derive rhythm block strictly bounded by available edition length
+  const totalDevotions = devotions.length;
+  const rhythmStart = totalDevotions > 0 ? Math.floor(todayIndex / 7) * 7 : 0;
+  const rhythmDays = Array.from(
+    { length: Math.min(7, Math.max(0, totalDevotions - rhythmStart)) },
+    (_, i) => rhythmStart + i
+  );
+  const rhythmCompletedCount = rhythmDays.filter((dayIdx) => completedDays.includes(dayIdx)).length;
+  const totalRhythmDays = rhythmDays.length;
+
   return (
     <View style={[styles.screen, isDark && styles.darkScreen]}>
       <SafeAreaView style={[styles.safeArea, isDark && styles.darkScreen]}>
@@ -40,62 +50,18 @@ export default function HomeScreen() {
         <ContentStatus loading={contentLoading} error={contentError} onRetry={refreshContent} />
         <FadeIn style={styles.motion}>
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+            {/* 1. GREETING */}
             <View style={styles.welcomeRow}>
               <Text style={[styles.greeting, isDark && styles.darkInk]}>{greetingForHour(currentHour, language)}</Text>
-              <Text style={[styles.welcomeMeta, isDark && styles.darkMuted]}>{reminderEnabled ? t(language, 'rhythmSet') : t(language, 'momentAwaits')}</Text>
+              <Text style={[styles.welcomeMeta, isDark && styles.darkMuted]}>{t(language, 'momentAwaits')}</Text>
             </View>
 
-            <View style={[styles.themeCard, isDark && styles.darkThemeCard]}>
-              <View style={styles.themeBadgeRow}>
-                <View style={styles.themeBadge}>
-                  <Text style={styles.themeBadgeText}>{edition ? `${edition.title.toUpperCase()} EDITION` : t(language, 'comingSoon')}</Text>
-                </View>
-                {source === 'offline' && (
-                  <View style={styles.offlineBadge}>
-                    <SymbolView name="wifi.slash" size={11} tintColor="#E0B66A" />
-                    <Text style={styles.offlineBadgeText}>{language === 'fr' ? 'Hors-Ligne (Cache)' : 'Offline (Cached)'}</Text>
-                  </View>
-                )}
-              </View>
-              <Text style={styles.themeTitle}>{edition?.theme ?? 'This month’s devotional'}</Text>
-              <Text style={styles.themeCopy}>{edition?.introduction || 'The devotional for this month will be available soon. Please check back shortly.'}</Text>
-              <View style={styles.themeFooter}>
-                <Text style={styles.themeMeta}>
-                  {edition
-                    ? `${completedDays.length} of ${devotions.length} days completed${source === 'offline' ? ' · Showing cached content' : ''}`
-                    : 'Content will appear here when published'}
-                </Text>
-                <View style={styles.progressTrack}>
-                  <View style={[styles.progressFill, { width: `${Math.max(monthlyProgress * 100, 3)}%` }]} />
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.quickActions}>
-              <Pressable onPress={() => router.push({ pathname: '/devotional', params: { day: String(todayIndex) } })} style={styles.quickAction}>
-                <View style={[styles.quickIcon, styles.quickIconWarm]}><SymbolView name="book.closed.fill" size={18} tintColor="#B96A43" /></View>
-                <Text style={[styles.quickLabel, isDark && styles.darkMuted]}>{t(language, 'today')}</Text>
-              </Pressable>
-              <Pressable onPress={() => router.push('/explore')} style={styles.quickAction}>
-                <View style={[styles.quickIcon, isDark && styles.darkQuickIcon]}><SymbolView name="books.vertical.fill" size={18} tintColor={isDark ? DewDesign.colors.darkInk : '#31543F'} /></View>
-                <Text style={[styles.quickLabel, isDark && styles.darkMuted]}>{t(language, 'library')}</Text>
-              </Pressable>
-              <Pressable onPress={() => router.push('/journey')} style={styles.quickAction}>
-                <View style={[styles.quickIcon, isDark && styles.darkQuickIcon]}><SymbolView name="chart.bar.fill" size={18} tintColor={isDark ? DewDesign.colors.darkInk : '#31543F'} /></View>
-                <Text style={[styles.quickLabel, isDark && styles.darkMuted]}>{t(language, 'journey')}</Text>
-              </Pressable>
-              <Pressable onPress={() => router.push('/journey')} style={styles.quickAction}>
-                <View style={[styles.quickIcon, isDark && styles.darkQuickIcon]}><SymbolView name="bookmark.fill" size={18} tintColor={isDark ? DewDesign.colors.darkInk : '#31543F'} /></View>
-                <Text style={[styles.quickLabel, isDark && styles.darkMuted]}>{t(language, 'saved')}</Text>
-              </Pressable>
-            </View>
-
+            {/* 2. TODAY'S DEW (Primary Focused Call-to-Action) */}
             <View style={styles.sectionHeading}>
-              <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{t(language, 'todaysMeditation')}</Text>
-              {today ? <Text style={[styles.sectionMeta, isDark && styles.darkMuted]}>{today.weekday}</Text> : null}
+              <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{t(language, 'todaysDew')}</Text>
+              {today ? <Text style={[styles.sectionMeta, isDark && styles.darkMuted]}>{today.weekday.toUpperCase()}</Text> : null}
             </View>
 
-            {/* Today's Meditation Content vs Empty State */}
             {!hasDevotions || !today ? (
               <View style={[styles.emptyMeditationCard, isDark && styles.darkDevotionCard]}>
                 <View style={styles.emptyIcon}>
@@ -103,67 +69,156 @@ export default function HomeScreen() {
                 </View>
                 <Text style={[styles.emptyTitle, isDark && styles.darkInk]}>{t(language, 'noMeditationTodayTitle')}</Text>
                 <Text style={[styles.emptyText, isDark && styles.darkMuted]}>{t(language, 'noMeditationTodayMsg')}</Text>
-                <Pressable onPress={() => router.push('/explore')} style={({ pressed }) => [styles.secondaryAction, pressed && styles.pressed]}>
+                <Pressable
+                  onPress={() => router.push('/explore')}
+                  style={({ pressed }) => [styles.secondaryAction, pressed && styles.pressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={t(language, 'exploreLibrary')}>
                   <Text style={styles.secondaryActionText}>{t(language, 'exploreLibrary')}</Text>
                   <SymbolView name="arrow.right" size={16} tintColor={DewDesign.colors.forest} />
                 </Pressable>
               </View>
-            ) : completed ? (
-              <View style={[styles.caughtUpCard, isDark && styles.darkDevotionCard]}>
-                <View style={styles.caughtUpIcon}><SymbolView name="checkmark" size={22} tintColor="#FFFFFF" /></View>
-                <Text style={[styles.caughtUpTitle, isDark && styles.darkInk]}>{t(language, 'allCaughtUp')}</Text>
-                <Text style={[styles.caughtUpText, isDark && styles.darkMuted]}>{t(language, 'meditationCompleteMessage')}</Text>
-                <Pressable onPress={() => router.push({ pathname: '/devotional', params: { day: String(todayIndex) } })} style={({ pressed }) => [styles.secondaryAction, pressed && styles.pressed]}>
-                  <Text style={styles.secondaryActionText}>{t(language, 'reviewMeditation')}</Text>
-                  <SymbolView name="arrow.right" size={16} tintColor="#31543F" />
-                </Pressable>
-              </View>
             ) : (
               <View style={[styles.devotionCard, isDark && styles.darkDevotionCard]}>
-                <View style={styles.devotionIcon}>
-                  <SymbolView name="book.closed.fill" size={20} tintColor="#F5E6C8" />
+                <View style={styles.devotionHeaderRow}>
+                  <View style={styles.devotionIcon}>
+                    <SymbolView name="book.closed.fill" size={20} tintColor="#F5E6C8" />
+                  </View>
+                  {completed && (
+                    <View style={styles.completedBadge}>
+                      <SymbolView name="checkmark" size={12} tintColor="#FFFFFF" />
+                      <Text style={styles.completedBadgeText}>{t(language, 'completedTag')}</Text>
+                    </View>
+                  )}
                 </View>
+
                 <Text style={[styles.devotionTitle, isDark && styles.darkInk]}>{today.title}</Text>
                 <Text style={[styles.scripture, isDark && { color: '#E4B98D' }]}>{today.scripture}</Text>
                 <Text style={[styles.preview, isDark && styles.darkMuted]} numberOfLines={3}>
                   {today.preview}
                 </Text>
+
                 <Pressable
                   onPress={() => router.push({ pathname: '/devotional', params: { day: String(todayIndex) } })}
-                  style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}
+                  style={({ pressed }) => [styles.primaryButton, completed && styles.primaryButtonCompleted, pressed && styles.pressed]}
                   accessibilityRole="button"
-                  accessibilityLabel="Begin today's meditation">
-                  <Text style={styles.primaryButtonText}>{t(language, 'beginMeditation')}</Text>
+                  accessibilityLabel={completed ? t(language, 'continueReading') : t(language, 'beginMeditation')}>
+                  <Text style={styles.primaryButtonText}>
+                    {completed ? t(language, 'continueReading') : t(language, 'beginMeditation')}
+                  </Text>
                   <SymbolView name="arrow.right" size={16} tintColor="#FFFFFF" />
                 </Pressable>
               </View>
             )}
 
+            {/* 3. YOUR RHYTHM & PROGRESS */}
             <View style={styles.sectionHeading}>
-              <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{t(language, 'yourJourney')}</Text>
-              <Text style={[styles.sectionMeta, isDark && styles.darkMuted]}>{completedDays.length} of 7 this week</Text>
+              <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{t(language, 'yourRhythm')}</Text>
+              <Text style={[styles.sectionMeta, isDark && styles.darkMuted]}>
+                {totalRhythmDays > 0
+                  ? `${rhythmCompletedCount} / ${totalRhythmDays} ${rhythmCompletedCount === 1 ? t(language, 'dayCompletedSuffix') : t(language, 'daysCompletedSuffix')}`
+                  : ''}
+              </Text>
             </View>
             <View style={[styles.weekCard, isDark && styles.darkWeekCard]}>
               <View style={styles.weekRow}>
-                {['1', '2', '3', '4', '5', '6', '7'].map((day, index) => (
-                  <View key={day} style={styles.dayItem}>
-                    <Text style={[styles.dayLabel, isDark && styles.darkMuted]}>{['W', 'T', 'F', 'S', 'S', 'M', 'T'][index]}</Text>
-                    <View style={[styles.dayCircle, isDark && styles.darkDayCircle, completedDays.includes(index) && styles.dayCircleActive]}>
-                      {completedDays.includes(index) ? (
-                        <SymbolView name="checkmark" size={14} tintColor="#FFFFFF" />
-                      ) : (
-                        <Text style={[styles.dayNumber, isDark && styles.darkInk]}>{day}</Text>
-                      )}
+                {rhythmDays.map((dayIdx) => {
+                  const isDone = completedDays.includes(dayIdx);
+                  const isTarget = dayIdx === todayIndex;
+                  return (
+                    <View key={dayIdx} style={styles.dayItem}>
+                      <Text style={[styles.dayLabel, isDark && styles.darkMuted, isTarget && styles.dayLabelTarget]}>
+                        {`D${dayIdx + 1}`}
+                      </Text>
+                      <View style={[styles.dayCircle, isDark && styles.darkDayCircle, isDone && styles.dayCircleActive, isTarget && !isDone && styles.dayCircleTarget]}>
+                        {isDone ? (
+                          <SymbolView name="checkmark" size={14} tintColor="#FFFFFF" />
+                        ) : (
+                          <Text style={[styles.dayNumber, isDark && styles.darkInk, isTarget && styles.dayNumberTarget]}>
+                            {dayIdx + 1}
+                          </Text>
+                        )}
+                      </View>
                     </View>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
               <View style={[styles.journeyFooter, isDark && { borderTopColor: DewDesign.colors.darkLine }]}>
-                <SymbolView name="flame.fill" size={16} tintColor={DewDesign.colors.terracotta} />
+                <SymbolView name="sparkles" size={16} tintColor={DewDesign.colors.terracotta} />
                 <Text style={[styles.streakText, isDark && styles.darkMuted]}>
-                  {completedDays.length} day{completedDays.length === 1 ? '' : 's'} complete. {t(language, 'keepShowingUp')}
+                  {`${completedDays.length} ${completedDays.length === 1 ? t(language, 'dayCompletedSuffix') : t(language, 'daysCompletedSuffix')} · ${t(language, 'aSteadyStep')}`}
                 </Text>
               </View>
+            </View>
+
+            {/* 4. THIS MONTH'S THEME */}
+            <View style={styles.sectionHeading}>
+              <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{t(language, 'thisMonthsTheme')}</Text>
+            </View>
+            <View style={[styles.themeCard, isDark && styles.darkThemeCard]}>
+              <View style={styles.themeBadgeRow}>
+                <View style={styles.themeBadge}>
+                  <Text style={styles.themeBadgeText}>
+                    {edition ? `${edition.title.toUpperCase()} ${t(language, 'editionLabel')}` : t(language, 'comingSoon')}
+                  </Text>
+                </View>
+                {source === 'offline' && (
+                  <View style={styles.offlineBadge}>
+                    <SymbolView name="wifi.slash" size={11} tintColor="#E0B66A" />
+                    <Text style={styles.offlineBadgeText}>{t(language, 'offlineCachedBadge')}</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.themeTitle}>{edition?.theme ?? t(language, 'thisMonthsDevotionalFallback')}</Text>
+              <Text style={styles.themeCopy} numberOfLines={4} ellipsizeMode="tail">
+                {edition?.introduction || t(language, 'thisMonthsDevotionalUpcoming')}
+              </Text>
+              <View style={styles.themeFooter}>
+                <Text style={styles.themeMeta}>
+                  {edition
+                    ? `${completedDays.length} / ${devotions.length} ${completedDays.length === 1 ? t(language, 'dayCompletedSuffix') : t(language, 'daysCompletedSuffix')}${source === 'offline' ? ` · ${t(language, 'showingCachedContent')}` : ''}`
+                    : t(language, 'contentWillAppear')}
+                </Text>
+                <View style={styles.progressTrack}>
+                  <View style={[styles.progressFill, { width: `${Math.max(monthlyProgress * 100, 3)}%` }]} />
+                </View>
+              </View>
+            </View>
+
+            {/* 5. SECONDARY QUICK ACCESS */}
+            <View style={styles.quickActions}>
+              <Pressable
+                onPress={() => router.push({ pathname: '/devotional', params: { day: String(todayIndex) } })}
+                style={styles.quickAction}
+                accessibilityRole="button"
+                accessibilityLabel={t(language, 'today')}>
+                <View style={[styles.quickIcon, styles.quickIconWarm]}><SymbolView name="book.closed.fill" size={18} tintColor="#B96A43" /></View>
+                <Text style={[styles.quickLabel, isDark && styles.darkMuted]}>{t(language, 'today')}</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => router.push('/explore')}
+                style={styles.quickAction}
+                accessibilityRole="button"
+                accessibilityLabel={t(language, 'library')}>
+                <View style={[styles.quickIcon, isDark && styles.darkQuickIcon]}><SymbolView name="books.vertical.fill" size={18} tintColor={isDark ? DewDesign.colors.darkInk : '#31543F'} /></View>
+                <Text style={[styles.quickLabel, isDark && styles.darkMuted]}>{t(language, 'library')}</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => router.push('/journey')}
+                style={styles.quickAction}
+                accessibilityRole="button"
+                accessibilityLabel={t(language, 'journey')}>
+                <View style={[styles.quickIcon, isDark && styles.darkQuickIcon]}><SymbolView name="chart.bar.fill" size={18} tintColor={isDark ? DewDesign.colors.darkInk : '#31543F'} /></View>
+                <Text style={[styles.quickLabel, isDark && styles.darkMuted]}>{t(language, 'journey')}</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => router.push('/journey')}
+                style={styles.quickAction}
+                accessibilityRole="button"
+                accessibilityLabel={t(language, 'saved')}>
+                <View style={[styles.quickIcon, isDark && styles.darkQuickIcon]}><SymbolView name="bookmark.fill" size={18} tintColor={isDark ? DewDesign.colors.darkInk : '#31543F'} /></View>
+                <Text style={[styles.quickLabel, isDark && styles.darkMuted]}>{t(language, 'saved')}</Text>
+              </Pressable>
             </View>
           </ScrollView>
         </FadeIn>
@@ -214,6 +269,10 @@ const styles = StyleSheet.create({
   sectionTitle: { color: DewDesign.colors.ink, fontSize: 18, fontWeight: '800' },
   sectionMeta: { color: DewDesign.colors.muted, fontSize: 12, fontWeight: '600' },
   devotionCard: { backgroundColor: DewDesign.colors.surface, borderRadius: 20, padding: 20, marginBottom: 26, borderWidth: 1, borderColor: DewDesign.colors.line },
+  devotionHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  devotionIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: DewDesign.colors.terracotta, alignItems: 'center', justifyContent: 'center' },
+  completedBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: DewDesign.colors.forest, paddingHorizontal: 10, paddingVertical: 5, borderRadius: DewDesign.radius.full },
+  completedBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
   emptyMeditationCard: { backgroundColor: DewDesign.colors.surface, borderRadius: 20, padding: 22, marginBottom: 26, alignItems: 'center', borderWidth: 1, borderColor: DewDesign.colors.line },
   emptyIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: DewDesign.colors.surfaceMuted, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   emptyTitle: { color: DewDesign.colors.ink, fontFamily: 'serif', fontSize: 20, fontWeight: '700', textAlign: 'center' },
@@ -224,19 +283,22 @@ const styles = StyleSheet.create({
   caughtUpText: { color: DewDesign.colors.body, fontSize: 14, lineHeight: 21, marginTop: 6, textAlign: 'center' },
   secondaryAction: { minHeight: 44, borderRadius: 11, backgroundColor: DewDesign.colors.surface, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, paddingHorizontal: 18, marginTop: 18, borderWidth: 1, borderColor: DewDesign.colors.line },
   secondaryActionText: { color: DewDesign.colors.forest, fontSize: 13, fontWeight: '800' },
-  devotionIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: DewDesign.colors.terracotta, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
   devotionTitle: { color: DewDesign.colors.ink, fontFamily: 'serif', fontSize: 25, fontWeight: '700', lineHeight: 31 },
   scripture: { color: DewDesign.colors.terracotta, fontSize: 13, fontWeight: '800', marginTop: 8 },
   preview: { color: DewDesign.colors.body, fontSize: 14, lineHeight: 22, marginTop: 14 },
   primaryButton: { backgroundColor: DewDesign.colors.terracotta, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 14, marginTop: 20 },
+  primaryButtonCompleted: { backgroundColor: DewDesign.colors.forest },
   primaryButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
   weekCard: { backgroundColor: DewDesign.colors.surfaceMuted, borderRadius: 18, padding: 17 },
   weekRow: { flexDirection: 'row', justifyContent: 'space-between' },
   dayItem: { alignItems: 'center', gap: 8 },
   dayLabel: { color: DewDesign.colors.muted, fontSize: 11, fontWeight: '800' },
+  dayLabelTarget: { color: DewDesign.colors.terracotta },
   dayCircle: { width: 31, height: 31, borderRadius: 16, backgroundColor: DewDesign.colors.surface, alignItems: 'center', justifyContent: 'center' },
   dayCircleActive: { backgroundColor: DewDesign.colors.terracotta },
+  dayCircleTarget: { borderWidth: 2, borderColor: DewDesign.colors.terracotta },
   dayNumber: { color: DewDesign.colors.body, fontSize: 12, fontWeight: '700' },
+  dayNumberTarget: { color: DewDesign.colors.terracotta, fontWeight: '900' },
   journeyFooter: { borderTopWidth: 1, borderTopColor: DewDesign.colors.line, flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16, paddingTop: 13 },
   streakText: { color: DewDesign.colors.body, fontSize: 12, fontWeight: '700' },
   pressed: { opacity: 0.82 },

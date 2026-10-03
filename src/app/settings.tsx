@@ -16,7 +16,7 @@ export default function SettingsScreen() {
   const { session, signOut } = useAuth();
   const { fontScale, setFontScale, language, setLanguage, reminderEnabled, setReminderEnabled, reminderHour, setReminderHour, newsletterEnabled, setNewsletterEnabled, themeMode, setThemeMode } = useSettings();
   const isDark = themeMode === 'dark';
-  const [reminderMessage, setReminderMessage] = useState('Daily at 7:00 AM');
+  const [reminderMessage, setReminderMessage] = useState<string | null>(null);
 
   const formatHour = (hour: number) => `${hour % 12 || 12}:00 ${hour >= 12 ? 'PM' : 'AM'}`;
 
@@ -24,11 +24,11 @@ export default function SettingsScreen() {
     if (reminderEnabled) {
       await cancelDailyReminder();
       setReminderEnabled(false);
-      setReminderMessage('Daily reminder is off');
+      setReminderMessage(t(language, 'reminderIsOff'));
       return;
     }
     const result = await scheduleDailyReminder(reminderHour);
-    setReminderMessage(result.message ?? `Daily at ${formatHour(reminderHour)}`);
+    setReminderMessage(result.message ?? t(language, 'dailyAtTime').replace('{time}', formatHour(reminderHour)));
     if (result.ok) setReminderEnabled(true);
   };
 
@@ -46,16 +46,20 @@ export default function SettingsScreen() {
           setReminderHour(nextHour);
           if (reminderEnabled) {
             const result = await scheduleDailyReminder(nextHour);
-            setReminderMessage(result.message ?? `Daily at ${formatHour(nextHour)}`);
+            setReminderMessage(result.message ?? t(language, 'dailyAtTime').replace('{time}', formatHour(nextHour)));
           } else {
-            setReminderMessage(`Daily at ${formatHour(nextHour)}`);
+            setReminderMessage(t(language, 'dailyAtTime').replace('{time}', formatHour(nextHour)));
           }
         },
       });
     } catch {
-      setReminderMessage('Custom time is available after the next development build');
+      setReminderMessage(t(language, 'customTimeAvailable'));
     }
   };
+
+  const activeReminderText = reminderEnabled
+    ? (reminderMessage ?? t(language, 'dailyAtTime').replace('{time}', formatHour(reminderHour)))
+    : (reminderMessage ?? t(language, 'reminderIsOff'));
 
   return (
     <View style={[styles.screen, isDark && styles.darkScreen]}>
@@ -64,7 +68,7 @@ export default function SettingsScreen() {
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <Text style={styles.kicker}>{t(language, 'yourSpace')}</Text>
           <Text style={[styles.title, isDark && styles.darkInk]}>{t(language, 'settings')}</Text>
-          <Text style={[styles.subtitle, isDark && styles.darkBody]}>Shape your daily reading rhythm.</Text>
+          <Text style={[styles.subtitle, isDark && styles.darkBody]}>{t(language, 'shapeReadingRhythm')}</Text>
 
           {/* Account & Cross-Device Sync */}
           <View style={[styles.section, isDark && styles.darkSection]}>
@@ -83,6 +87,8 @@ export default function SettingsScreen() {
               </View>
               <Pressable
                 onPress={() => (session ? signOut() : router.push('/auth'))}
+                accessibilityRole="button"
+                accessibilityLabel={session ? t(language, 'logout') : t(language, 'login')}
                 style={[styles.authPill, session && styles.signOutPill]}>
                 <Text style={[styles.authPillText, session && styles.signOutPillText]}>
                   {session ? t(language, 'logout') : t(language, 'login')}
@@ -95,10 +101,20 @@ export default function SettingsScreen() {
           <View style={[styles.section, isDark && styles.darkSection]}>
             <Text style={styles.sectionLabel}>{t(language, 'appearance')}</Text>
             <View style={styles.languageRow}>
-              <Pressable onPress={() => setThemeMode('light')} style={[styles.languageOption, themeMode === 'light' && styles.languageOptionActive]}>
+              <Pressable
+                onPress={() => setThemeMode('light')}
+                accessibilityRole="button"
+                accessibilityState={{ selected: themeMode === 'light' }}
+                accessibilityLabel={t(language, 'light')}
+                style={[styles.languageOption, themeMode === 'light' && styles.languageOptionActive]}>
                 <Text style={[styles.languageText, themeMode === 'light' && styles.languageTextActive]}>{t(language, 'light')}</Text>
               </Pressable>
-              <Pressable onPress={() => setThemeMode('dark')} style={[styles.languageOption, themeMode === 'dark' && styles.languageOptionActive]}>
+              <Pressable
+                onPress={() => setThemeMode('dark')}
+                accessibilityRole="button"
+                accessibilityState={{ selected: themeMode === 'dark' }}
+                accessibilityLabel={t(language, 'dark')}
+                style={[styles.languageOption, themeMode === 'dark' && styles.languageOptionActive]}>
                 <Text style={[styles.languageText, themeMode === 'dark' && styles.languageTextActive]}>{t(language, 'dark')}</Text>
               </Pressable>
             </View>
@@ -130,6 +146,9 @@ export default function SettingsScreen() {
                 <Pressable
                   key={size}
                   onPress={() => setFontScale(size)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: fontScale === size }}
+                  accessibilityLabel={`${t(language, 'textSize')} ${size}x`}
                   style={[styles.sizeOption, fontScale === size && styles.sizeOptionActive]}>
                   <Text style={[styles.sizeText, fontScale === size && styles.sizeTextActive, { fontSize: 12 + size * 3 }]}>A</Text>
                 </Pressable>
@@ -148,13 +167,18 @@ export default function SettingsScreen() {
           {/* Daily Rhythm Reminders */}
           <View style={[styles.section, isDark && styles.darkSection]}>
             <Text style={styles.sectionLabel}>{t(language, 'dailyRhythm')}</Text>
-            <Pressable onPress={toggleReminder} style={styles.settingRow} accessibilityRole="switch" accessibilityState={{ checked: reminderEnabled }}>
+            <Pressable
+              onPress={toggleReminder}
+              style={styles.settingRow}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: reminderEnabled }}
+              accessibilityLabel={t(language, 'morningReminder')}>
               <View style={styles.settingIcon}>
                 <SymbolView name="bell.fill" size={18} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
               </View>
               <View style={styles.copy}>
                 <Text style={[styles.settingTitle, isDark && styles.darkInk]}>{t(language, 'morningReminder')}</Text>
-                <Text style={[styles.settingMeta, isDark && styles.darkBody]}>{reminderEnabled ? `Daily at ${formatHour(reminderHour)}` : reminderMessage}</Text>
+                <Text style={[styles.settingMeta, isDark && styles.darkBody]}>{activeReminderText}</Text>
               </View>
               <View style={[styles.toggle, reminderEnabled && styles.toggleActive]}>
                 <View style={[styles.toggleKnob, reminderEnabled && styles.toggleKnobActive]} />
@@ -168,9 +192,11 @@ export default function SettingsScreen() {
                     setReminderHour(hour);
                     if (reminderEnabled) {
                       const result = await scheduleDailyReminder(hour);
-                      setReminderMessage(result.message ?? `Daily at ${formatHour(hour)}`);
+                      setReminderMessage(result.message ?? t(language, 'dailyAtTime').replace('{time}', formatHour(hour)));
                     }
                   }}
+                  accessibilityRole="button"
+                  accessibilityLabel={formatHour(hour)}
                   style={[styles.timeChoice, isDark && styles.darkTimeChoice, reminderHour === hour && styles.timeChoiceActive]}>
                   <Text style={[styles.timeChoiceText, isDark && styles.darkMuted, reminderHour === hour && styles.timeChoiceTextActive]}>
                     {formatHour(hour)}
@@ -179,6 +205,8 @@ export default function SettingsScreen() {
               ))}
               <Pressable
                 onPress={chooseReminderTime}
+                accessibilityRole="button"
+                accessibilityLabel={t(language, 'customTimeLabel').replace('{time}', formatHour(reminderHour))}
                 style={[styles.timeChoice, isDark && styles.darkTimeChoice, ![7, 12, 18, 21].includes(reminderHour) && styles.timeChoiceActive]}>
                 <SymbolView
                   name="clock"
@@ -186,7 +214,7 @@ export default function SettingsScreen() {
                   tintColor={![7, 12, 18, 21].includes(reminderHour) ? '#FFFFFF' : isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest}
                 />
                 <Text style={[styles.timeChoiceText, isDark && styles.darkMuted, ![7, 12, 18, 21].includes(reminderHour) && styles.timeChoiceTextActive]}>
-                  Custom {formatHour(reminderHour)}
+                  {t(language, 'customTimeLabel').replace('{time}', formatHour(reminderHour))}
                 </Text>
               </Pressable>
             </View>
@@ -196,11 +224,21 @@ export default function SettingsScreen() {
           <View style={[styles.section, isDark && styles.darkSection]}>
             <Text style={styles.sectionLabel}>{t(language, 'language')}</Text>
             <View style={styles.languageRow}>
-              <Pressable onPress={() => setLanguage('en')} style={[styles.languageOption, language === 'en' && styles.languageOptionActive]}>
-                <Text style={[styles.languageText, language === 'en' && styles.languageTextActive]}>English</Text>
+              <Pressable
+                onPress={() => setLanguage('en')}
+                accessibilityRole="button"
+                accessibilityState={{ selected: language === 'en' }}
+                accessibilityLabel={t(language, 'english')}
+                style={[styles.languageOption, language === 'en' && styles.languageOptionActive]}>
+                <Text style={[styles.languageText, language === 'en' && styles.languageTextActive]}>{t(language, 'english')}</Text>
               </Pressable>
-              <Pressable onPress={() => setLanguage('fr')} style={[styles.languageOption, language === 'fr' && styles.languageOptionActive]}>
-                <Text style={[styles.languageText, language === 'fr' && styles.languageTextActive]}>Français</Text>
+              <Pressable
+                onPress={() => setLanguage('fr')}
+                accessibilityRole="button"
+                accessibilityState={{ selected: language === 'fr' }}
+                accessibilityLabel={t(language, 'french')}
+                style={[styles.languageOption, language === 'fr' && styles.languageOptionActive]}>
+                <Text style={[styles.languageText, language === 'fr' && styles.languageTextActive]}>{t(language, 'french')}</Text>
               </Pressable>
             </View>
             <View style={styles.settingRow}>
@@ -208,9 +246,11 @@ export default function SettingsScreen() {
                 <SymbolView name="globe" size={18} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
               </View>
               <View style={styles.copy}>
-                <Text style={[styles.settingTitle, isDark && styles.darkInk]}>{language === 'fr' ? 'Français' : 'English'}</Text>
+                <Text style={[styles.settingTitle, isDark && styles.darkInk]}>
+                  {language === 'fr' ? t(language, 'french') : t(language, 'english')}
+                </Text>
                 <Text style={[styles.settingMeta, isDark && styles.darkBody]}>
-                  {language === 'fr' ? 'Traductions disponibles pour votre parcours.' : 'Full English edition active.'}
+                  {language === 'fr' ? t(language, 'frenchEditionDesc') : t(language, 'englishEditionDesc')}
                 </Text>
               </View>
               <SymbolView name="checkmark" size={17} tintColor={DewDesign.colors.terracotta} />
@@ -220,7 +260,12 @@ export default function SettingsScreen() {
           {/* Community Updates */}
           <View style={[styles.section, isDark && styles.darkSection]}>
             <Text style={styles.sectionLabel}>{t(language, 'community')}</Text>
-            <Pressable onPress={() => setNewsletterEnabled(!newsletterEnabled)} style={styles.settingRow} accessibilityRole="switch" accessibilityState={{ checked: newsletterEnabled }}>
+            <Pressable
+              onPress={() => setNewsletterEnabled(!newsletterEnabled)}
+              style={styles.settingRow}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: newsletterEnabled }}
+              accessibilityLabel={t(language, 'ministryUpdates')}>
               <View style={styles.settingIcon}>
                 <SymbolView name="envelope" size={18} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
               </View>
@@ -236,11 +281,16 @@ export default function SettingsScreen() {
             </Pressable>
           </View>
 
-          <View style={[styles.note, isDark && styles.darkSection]}>
+          {/* About & Support Links */}
+          <Pressable
+            onPress={() => router.push('/legal')}
+            style={[styles.note, isDark && styles.darkSection]}
+            accessibilityRole="button"
+            accessibilityLabel={t(language, 'aboutPrivacySupport')}>
             <Text style={[styles.noteTitle, isDark && styles.darkInk]}>Daily Dew Devotional</Text>
             <Text style={styles.noteSubtitle}>A Devotional for the Strange Breeds</Text>
-            <Text style={[styles.noteText, isDark && styles.darkBody]}>Your reading preferences are saved on this device.</Text>
-          </View>
+            <Text style={[styles.noteText, isDark && styles.darkBody]}>{t(language, 'aboutPrivacySupport')}</Text>
+          </Pressable>
         </ScrollView>
         <AppBottomNav />
       </SafeAreaView>
