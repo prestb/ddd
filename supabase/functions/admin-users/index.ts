@@ -64,17 +64,41 @@ Deno.serve(async (request) => {
       return json({ error: 'DATABASE_ERROR', message: 'Could not retrieve user profiles.' }, 500);
     }
 
-    // 2. Fetch all Auth users via Admin API safely
+    // 2. Fetch all Auth users via Admin API using paginated requests (fail-closed)
     const authUsersMap = new Map<string, any>();
+    let page = 1;
+    const perPage = 1000;
+    let hasMoreAuthUsers = true;
+
     try {
-      const { data: authUsersData } = await admin.auth.admin.listUsers();
-      if (Array.isArray(authUsersData?.users)) {
-        authUsersData.users.forEach((u: any) => {
+      while (hasMoreAuthUsers) {
+        const { data: authUsersData, error: authUsersError } = await admin.auth.admin.listUsers({ page, perPage });
+
+        if (authUsersError) {
+          console.error(`admin-users: Auth listUsers error on page ${page}`, authUsersError);
+          return json({
+            error: 'AUTH_USERS_FETCH_FAILED',
+            message: 'Could not retrieve authentication accounts. Please try again.',
+          }, 500);
+        }
+
+        const usersBatch = authUsersData?.users ?? [];
+        usersBatch.forEach((u: any) => {
           authUsersMap.set(u.id, u);
         });
+
+        if (usersBatch.length < perPage) {
+          hasMoreAuthUsers = false;
+        } else {
+          page++;
+        }
       }
-    } catch (e) {
-      console.error('admin-users: Auth listUsers error', e);
+    } catch (fetchErr) {
+      console.error('admin-users: Exception during Auth user listing', fetchErr);
+      return json({
+        error: 'AUTH_USERS_FETCH_FAILED',
+        message: 'Could not retrieve authentication accounts. Please try again.',
+      }, 500);
     }
 
     // 3. Construct True Union: Auth Users ∪ Profiles
@@ -97,7 +121,7 @@ Deno.serve(async (request) => {
         email: authU?.email ?? null,
         auth_account_missing: !hasAuth,
         profile_missing: !hasProfile,
-        role: profileP?.role ?? (id === adminUser.id && isMinistryAdminByEmail ? 'admin' : 'reader'),
+        role: profileP?.role ?? (hasAuth ? 'none' : 'reader'),
         created_at: profileP?.created_at ?? authU?.created_at ?? new Date().toISOString(),
       };
     });
