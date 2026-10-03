@@ -120,6 +120,18 @@ Deno.serve(async (request) => {
     let result: any = {};
     try { result = rawResponse ? JSON.parse(rawResponse) : {}; } catch { result = { message: rawResponse }; }
 
+    // Safe, non-sensitive Direct Pay server diagnostic logging (NO API keys or full PINs)
+    console.log('Fapshi Direct Pay Diagnostics:', {
+      baseUrl: baseUrl.replace(/\/$/, ''),
+      httpStatus: response.status,
+      transId: result?.transId ?? null,
+      providerStatus: result?.status ?? null,
+      providerMessage: result?.message ?? null,
+      externalReference,
+      medium,
+      amount,
+    });
+
     if (!response.ok || !result?.transId) {
       const providerMessage = result?.message || rawResponse || 'No response body was returned by Fapshi.';
       console.error(`Fapshi Direct Pay deposit failed: HTTP ${response.status} - ${providerMessage}`);
@@ -132,8 +144,8 @@ Deno.serve(async (request) => {
       throw new Error(`Fapshi HTTP ${response.status}: ${providerMessage}`);
     }
 
-    // 3. Update payment_transactions row with provider_transaction_id
-    await admin
+    // 3. Update payment_transactions row with provider_transaction_id with explicit error checking
+    const { error: paymentUpdateError } = await admin
       .from('payment_transactions')
       .update({
         provider_transaction_id: result.transId,
@@ -146,6 +158,17 @@ Deno.serve(async (request) => {
         },
       })
       .eq('id', pendingTx.id);
+
+    if (paymentUpdateError) {
+      console.error('Failed to persist provider_transaction_id:', paymentUpdateError);
+      return json(
+        {
+          error: 'PAYMENT_PERSISTENCE_FAILED',
+          message: 'The payment was requested but the payment transaction could not be recorded.',
+        },
+        500
+      );
+    }
 
     return json({
       success: true,
