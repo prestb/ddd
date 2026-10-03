@@ -14,6 +14,20 @@ import { supabase } from '@/lib/supabase';
 type PaymentStep = 'select' | 'review' | 'pending' | 'success' | 'failed';
 type MobileMoneyProvider = 'mtn' | 'orange';
 
+function normalizeCameroonPhone(input: string): string {
+  const digits = input.replace(/\D/g, '');
+  if (digits.length === 9 && digits.startsWith('6')) {
+    return digits;
+  }
+  if (digits.length === 12 && digits.startsWith('2376')) {
+    return digits.slice(3);
+  }
+  if (digits.length === 10 && digits.startsWith('06')) {
+    return digits.slice(1);
+  }
+  return digits;
+}
+
 /**
  * Isolated Wallet Funding Service Boundary
  * Connects exclusively to the financial backend (create-wallet-deposit & payment_transactions).
@@ -116,8 +130,18 @@ export default function AddFundsScreen() {
   const [updatedBalance, setUpdatedBalance] = useState<number | null>(null);
   const [verifiedAmount, setVerifiedAmount] = useState<number | null>(null);
   const [balanceUnavailable, setBalanceUnavailable] = useState(false);
+  const [pollingTimedOut, setPollingTimedOut] = useState(false);
 
   const isCheckingRef = useRef(false);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const amount = customAmountText ? (parseInt(customAmountText, 10) || 0) : selectedAmount;
 
   const handleSelectPreset = (val: number) => {
@@ -130,11 +154,12 @@ export default function AddFundsScreen() {
       setErrorMessage(language === 'fr' ? 'Saisissez un montant valide entre 100 et 10 000 000 XAF.' : 'Enter a valid amount between 100 and 10,000,000 XAF.');
       return;
     }
-    const cleanPhone = phone.replace(/\D/g, '');
-    if (cleanPhone.length < 9) {
+    const cleanPhone = normalizeCameroonPhone(phone);
+    if (cleanPhone.length !== 9 || !cleanPhone.startsWith('6')) {
       setErrorMessage(language === 'fr' ? 'Saisissez un numéro Mobile Money valide (9 chiffres).' : 'Enter a valid 9-digit Mobile Money phone number.');
       return;
     }
+    setPhone(cleanPhone); // Save canonical 9-digit format
     setErrorMessage(null);
     setStep('review');
   };
@@ -142,6 +167,7 @@ export default function AddFundsScreen() {
   const handleInitiatePayment = async () => {
     setBusy(true);
     setErrorMessage(null);
+    setPollingTimedOut(false);
 
     try {
       const deposit = await walletFundingService.createDeposit({
@@ -151,30 +177,40 @@ export default function AddFundsScreen() {
         email: session?.user.email ?? '',
       });
 
-      setTransId(deposit.transId);
-      setStep('pending');
+      if (isMountedRef.current) {
+        setTransId(deposit.transId);
+        setStep('pending');
+      }
     } catch (err) {
-      setErrorMessage(
-        err instanceof Error ? err.message : (language === 'fr' ? 'Impossible de démarrer le paiement.' : 'Could not start payment.')
-      );
+      if (isMountedRef.current) {
+        setErrorMessage(
+          err instanceof Error ? err.message : (language === 'fr' ? 'Impossible de démarrer le paiement.' : 'Could not start payment.')
+        );
+      }
     } finally {
-      setBusy(false);
+      if (isMountedRef.current) {
+        setBusy(false);
+      }
     }
   };
 
   const handleVerifyBackendStatus = useCallback(async () => {
     if (!transId || isCheckingRef.current) return;
     isCheckingRef.current = true;
-    setBusy(true);
+    if (isMountedRef.current) setBusy(true);
 
     try {
       const result = await walletFundingService.verifyDepositStatus(transId);
+
+      if (!isMountedRef.current) return;
 
       if (result.status === 'successful') {
         if (result.amount) setVerifiedAmount(result.amount);
         const freshBalance = session?.user.id
           ? await walletFundingService.getUserBalance(session.user.id)
           : null;
+
+        if (!isMountedRef.current) return;
 
         if (typeof freshBalance === 'number') {
           setUpdatedBalance(freshBalance);
@@ -203,16 +239,18 @@ export default function AddFundsScreen() {
         );
       }
     } catch {
-      setErrorMessage(
-        language === 'fr'
-          ? 'Le statut du paiement est temporairement indisponible. Nous continuerons à vérifier automatiquement.'
-          : 'Payment status is temporarily unavailable. We’ll keep checking automatically.'
-      );
+      if (isMountedRef.current) {
+        setErrorMessage(
+          language === 'fr'
+            ? 'Le statut du paiement est temporairement indisponible. Nous continuerons à vérifier automatiquement.'
+            : 'Payment status is temporarily unavailable. We’ll keep checking automatically.'
+        );
+      }
     } finally {
       isCheckingRef.current = false;
-      setBusy(false);
+      if (isMountedRef.current) setBusy(false);
     }
-  }, [amount, language, session, transId]);
+  }, [language, session, transId]);
 
   // Automatic Controlled Status Polling when step === 'pending'
   useEffect(() => {
@@ -228,6 +266,9 @@ export default function AddFundsScreen() {
       pollCount++;
       if (pollCount >= maxPolls || !active) {
         clearInterval(interval);
+        if (active && isMountedRef.current) {
+          setPollingTimedOut(true);
+        }
         return;
       }
       if (active) {
@@ -424,6 +465,14 @@ export default function AddFundsScreen() {
                   <Text style={[styles.refValue, isDark && styles.darkInk]}>{transId}</Text>
                 </View>
               ) : null}
+
+              {pollingTimedOut && (
+                <Text style={[styles.balanceNotice, { color: DewDesign.colors.terracotta, fontStyle: 'italic', marginTop: 12 }]}>
+                  {language === 'fr'
+                    ? 'La vérification automatique est en pause. Votre paiement peut toujours être en cours de traitement. Appuyez sur « Vérifier le statut » pour vérifier à nouveau.'
+                    : 'Automatic checking has paused. Your payment may still be processing. Tap “Check Status” to check again.'}
+                </Text>
+              )}
 
               {errorMessage && <Text style={styles.errorText}>{errorMessage}</Text>}
 
