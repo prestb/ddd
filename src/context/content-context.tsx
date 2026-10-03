@@ -7,6 +7,9 @@ import { useSettings } from '@/context/settings-context';
 import { useAuth } from '@/context/auth-context';
 import { getEditionCacheKey, validateDevotions } from '@/lib/content-validation';
 
+export type NetworkStatus = 'online' | 'offline' | 'unknown';
+export type ContentSource = 'cloud' | 'cache' | 'none';
+
 type EditionMeta = {
   slug: string;
   title: string;
@@ -21,7 +24,8 @@ type EditionMeta = {
 type ContentContextValue = {
   devotions: Devotion[];
   edition: EditionMeta | null;
-  source: 'offline' | 'cloud';
+  source: ContentSource;
+  networkStatus: NetworkStatus;
   loading: boolean;
   error: string | null;
   refresh: () => void;
@@ -36,10 +40,29 @@ export function ContentProvider({ children }: PropsWithChildren) {
   const { session } = useAuth();
   const [devotions, setDevotions] = useState<Devotion[]>([]);
   const [edition, setEdition] = useState<ContentContextValue['edition']>(null);
-  const [source, setSource] = useState<'offline' | 'cloud'>('offline');
+  const [source, setSource] = useState<ContentSource>('none');
+  const [networkStatus, setNetworkStatus] = useState<NetworkStatus>('unknown');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+
+  // Network Event Listener
+  useEffect(() => {
+    const handleOnline = () => setNetworkStatus('online');
+    const handleOffline = () => setNetworkStatus('offline');
+
+    if (typeof globalThis.addEventListener === 'function') {
+      globalThis.addEventListener('online', handleOnline);
+      globalThis.addEventListener('offline', handleOffline);
+    }
+
+    return () => {
+      if (typeof globalThis.removeEventListener === 'function') {
+        globalThis.removeEventListener('online', handleOnline);
+        globalThis.removeEventListener('offline', handleOffline);
+      }
+    };
+  }, []);
 
   // 1. Instant Cache Hydration on Mount, Language Switch, or Account Session Change
   useEffect(() => {
@@ -127,7 +150,7 @@ export function ContentProvider({ children }: PropsWithChildren) {
                 }))
               );
             }
-            setSource('offline');
+            setSource((prev) => (prev === 'cloud' ? 'cloud' : 'cache'));
             setLoading(false);
           }
         }
@@ -187,6 +210,7 @@ export function ContentProvider({ children }: PropsWithChildren) {
             setDevotions(checked.valid);
             setEdition(fetchedEdition);
             setSource('cloud');
+            setNetworkStatus('online');
             setError(null);
 
             const hasFullPremiumAccess = checked.valid.every((d) => !d.isLocked);
@@ -205,14 +229,57 @@ export function ContentProvider({ children }: PropsWithChildren) {
           }
         }
 
-        // If RPC is unavailable or returns an error, retain valid cached data without direct table fallback
+        // If RPC is unavailable or returns an error, retain valid cached data
         if (!cancelled) {
-          setSource('offline');
+          const isOfflineError = Boolean(
+            rpcError?.message?.toLowerCase().includes('network') ||
+            rpcError?.message?.toLowerCase().includes('fetch') ||
+            (typeof navigator !== 'undefined' && navigator.onLine === false)
+          );
+
+          setNetworkStatus(isOfflineError ? 'offline' : 'online');
+
+          setDevotions((prev) => {
+            if (prev.length > 0) {
+              setSource('cache');
+              setError(
+                rpcError?.message ||
+                (language === 'fr'
+                  ? 'Impossible de synchroniser avec le serveur. Affichage du contenu enregistré.'
+                  : 'Unable to sync with cloud. Showing saved content.')
+              );
+            } else {
+              setSource('none');
+              setError(rpcError?.message || 'Content unavailable.');
+            }
+            return prev;
+          });
         }
-      } catch {
-        // Network/offline exception: silently retain cached state
+      } catch (err: any) {
         if (!cancelled) {
-          setSource('offline');
+          const isOfflineError = Boolean(
+            err instanceof TypeError ||
+            err?.message?.toLowerCase().includes('network') ||
+            err?.message?.toLowerCase().includes('fetch') ||
+            (typeof navigator !== 'undefined' && navigator.onLine === false)
+          );
+
+          setNetworkStatus(isOfflineError ? 'offline' : 'online');
+
+          setDevotions((prev) => {
+            if (prev.length > 0) {
+              setSource('cache');
+              setError(
+                language === 'fr'
+                  ? 'Impossible de synchroniser avec le serveur. Affichage du contenu enregistré.'
+                  : 'Unable to sync with cloud. Showing saved content.'
+              );
+            } else {
+              setSource('none');
+              setError(err instanceof Error ? err.message : 'Content unavailable.');
+            }
+            return prev;
+          });
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -225,7 +292,7 @@ export function ContentProvider({ children }: PropsWithChildren) {
   }, [language, reloadToken, session]);
 
   const refresh = useCallback(() => setReloadToken((value) => value + 1), []);
-  const value = useMemo(() => ({ devotions, edition, source, loading, error, refresh }), [devotions, edition, source, loading, error, refresh]);
+  const value = useMemo(() => ({ devotions, edition, source, networkStatus, loading, error, refresh }), [devotions, edition, source, networkStatus, loading, error, refresh]);
 
   return <ContentContext.Provider value={value}>{children}</ContentContext.Provider>;
 }

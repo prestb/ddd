@@ -17,7 +17,7 @@ import ContentStatus from '@/components/content-status';
 export default function HomeScreen() {
   const { language, themeMode } = useSettings();
   const isDark = themeMode === 'dark';
-  const { devotions, edition, source, error: contentError, loading: contentLoading, refresh: refreshContent } = useContent();
+  const { devotions, edition, source, networkStatus, error: contentError, loading: contentLoading, refresh: refreshContent } = useContent();
 
   const calendarDate = new Date();
   const editionIsCurrentMonth = Boolean(edition && edition.year === calendarDate.getFullYear() && edition.month === calendarDate.getMonth() + 1);
@@ -162,10 +162,16 @@ export default function HomeScreen() {
                     {edition ? `${edition.title.toUpperCase()} ${t(language, 'editionLabel')}` : t(language, 'comingSoon')}
                   </Text>
                 </View>
-                {source === 'offline' && (
+                {source === 'cache' && networkStatus === 'offline' && (
                   <View style={styles.offlineBadge}>
                     <SymbolView name="wifi.slash" size={11} tintColor="#E0B66A" />
-                    <Text style={styles.offlineBadgeText}>{t(language, 'offlineCachedBadge')}</Text>
+                    <Text style={styles.offlineBadgeText}>{t(language, 'offlineShowingCache')}</Text>
+                  </View>
+                )}
+                {source === 'cache' && networkStatus !== 'offline' && (
+                  <View style={styles.offlineBadge}>
+                    <SymbolView name="arrow.clockwise" size={11} tintColor="#E0B66A" />
+                    <Text style={styles.offlineBadgeText}>{t(language, 'syncFailedShowingCache')}</Text>
                   </View>
                 )}
               </View>
@@ -176,7 +182,7 @@ export default function HomeScreen() {
               <View style={styles.themeFooter}>
                 <Text style={styles.themeMeta}>
                   {edition
-                    ? `${completedDays.length} / ${devotions.length} ${completedDays.length === 1 ? t(language, 'dayCompletedSuffix') : t(language, 'daysCompletedSuffix')}${source === 'offline' ? ` · ${t(language, 'showingCachedContent')}` : ''}`
+                    ? `${completedDays.length} / ${devotions.length} ${completedDays.length === 1 ? t(language, 'dayCompletedSuffix') : t(language, 'daysCompletedSuffix')}${source === 'cache' ? ` · ${t(language, 'showingCachedContent')}` : ''}`
                     : t(language, 'contentWillAppear')}
                 </Text>
                 <View style={styles.progressTrack}>
