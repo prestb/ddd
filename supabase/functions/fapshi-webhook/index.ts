@@ -23,7 +23,13 @@ Deno.serve(async (request) => {
     if (!status || !payload?.transId) return new Response(JSON.stringify({ received: true }), { headers: { ...cors, 'Content-Type': 'application/json' } });
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-    const { error } = await admin.from('donations').update({ status, updated_at: new Date().toISOString() }).eq('transaction_id', payload.transId);
+    // Monotonic Terminal State Guard: Update donation status ONLY if current status is 'pending'
+    const { error } = await admin
+      .from('donations')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('transaction_id', payload.transId)
+      .eq('status', 'pending');
+
     if (error) throw error;
 
     return new Response(JSON.stringify({ received: true }), { headers: { ...cors, 'Content-Type': 'application/json' } });
