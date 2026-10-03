@@ -91,6 +91,7 @@ export default function AdminScreen() {
   const [devotions, setDevotions] = useState<Devotion[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingDevotions, setLoadingDevotions] = useState(false);
+  const [devotionsError, setDevotionsError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedEditionId, setSelectedEditionId] = useState<string | null>(null);
 
@@ -323,10 +324,15 @@ export default function AdminScreen() {
   const loadDevotions = async (editionId: string) => {
     if (!supabase) return;
     setLoadingDevotions(true);
+    setDevotionsError(null);
     const { data, error } = await supabase.from('devotions').select('*').eq('edition_id', editionId).order('day_number');
     setLoadingDevotions(false);
-    if (error) Alert.alert('Could not load meditations', error.message);
-    else setDevotions((data ?? []) as Devotion[]);
+    if (error) {
+      setDevotionsError(error.message || 'Could not load meditations for this edition.');
+      setDevotions([]);
+    } else {
+      setDevotions((data ?? []) as Devotion[]);
+    }
   };
 
   const handleCreateUser = async () => {
@@ -959,6 +965,14 @@ export default function AdminScreen() {
 
                             {loadingDevotions ? (
                               <ActivityIndicator size="small" color={DewDesign.colors.forest} style={{ marginVertical: 14 }} />
+                            ) : devotionsError ? (
+                              <View style={{ alignItems: 'center', paddingVertical: 12 }}>
+                                <Text style={[styles.errorText, { marginBottom: 10 }]}>{devotionsError}</Text>
+                                <Pressable onPress={() => loadDevotions(editionItem.id)} style={styles.actionBtnPill}>
+                                  <AppIcon name="refresh" size={12} tintColor={DewDesign.colors.forest} />
+                                  <Text style={styles.actionBtnLabel}>Retry</Text>
+                                </Pressable>
+                              </View>
                             ) : devotions.length === 0 ? (
                               <Text style={[styles.emptyText, isDark && styles.darkMuted, { marginVertical: 12, textAlign: 'left' }]}>
                                 No meditations have been added to this edition yet. Tap &quot;+ Add Meditation&quot; or &quot;Import PDF&quot; to add content.
@@ -1101,26 +1115,34 @@ export default function AdminScreen() {
                       ) : null}
                     </View>
                   ) : (
-                    usersList.map((userItem) => (
-                      <View key={userItem.id} style={[styles.editionCard, isDark && styles.darkCard, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
-                        <View style={{ flex: 1 }}>
-                          <Text style={[styles.editionTitle, isDark && styles.darkInk]}>
-                            {userItem.email ?? (language === 'fr' ? 'Compte d’authentification manquant' : 'Authentication account missing')}
-                          </Text>
-                          <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>
-                            {userItem.auth_account_missing ? 'PROFILE ONLY' : `Role: ${userItem.role.toUpperCase()}`}
-                          </Text>
+                    usersList.map((userItem) => {
+                      const isProfileOnly = userItem.auth_account_missing;
+                      const isAuthOnly = (userItem as any).profile_missing;
+                      return (
+                        <View key={userItem.id} style={[styles.editionCard, isDark && styles.darkCard, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
+                          <View style={{ flex: 1, marginRight: 8 }}>
+                            <Text style={[styles.editionTitle, isDark && styles.darkInk, isProfileOnly && styles.warningText]}>
+                              {userItem.email ?? (language === 'fr' ? 'Compte d’authentification manquant' : 'Authentication account missing')}
+                            </Text>
+                            <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>
+                              {isProfileOnly
+                                ? 'PROFILE ONLY / AUTH MISSING'
+                                : isAuthOnly
+                                ? 'AUTH ONLY / PROFILE MISSING'
+                                : `Role: ${userItem.role.toUpperCase()}`}
+                            </Text>
+                          </View>
+                          {role === 'admin' && !isAuthOnly ? (
+                            <Pressable
+                              onPress={() => setEditingUser({ id: userItem.id, role: userItem.role, email: userItem.email })}
+                              style={styles.actionBtnPill}>
+                              <AppIcon name="pencil" size={12} tintColor={DewDesign.colors.forest} />
+                              <Text style={styles.actionBtnLabel}>Role</Text>
+                            </Pressable>
+                          ) : null}
                         </View>
-                        {role === 'admin' ? (
-                          <Pressable
-                            onPress={() => setEditingUser({ id: userItem.id, role: userItem.role, email: userItem.email })}
-                            style={styles.actionBtnPill}>
-                            <AppIcon name="pencil" size={12} tintColor={DewDesign.colors.forest} />
-                            <Text style={styles.actionBtnLabel}>Role</Text>
-                          </Pressable>
-                        ) : null}
-                      </View>
-                    ))
+                      );
+                    })
                   )}
                 </View>
               ) : adminTab === 'finance' ? (
