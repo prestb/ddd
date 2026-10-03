@@ -20,7 +20,7 @@ export default function MembershipScreen() {
 
   const [selectedPlan, setSelectedPlan] = useState<PlanChoice>('annual');
   const [autoRenew, setAutoRenew] = useState(true);
-  const [balance, setBalance] = useState(2500); // Account balance XAF
+  const [balance, setBalance] = useState(0); // Authoritative account balance XAF (starts at 0)
   const [isPremium, setIsPremium] = useState(false); // Premium active status
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -68,31 +68,10 @@ export default function MembershipScreen() {
     setMessage(null);
 
     const targetPlanName = selectedPlan === 'annual' ? 'Annual' : 'Monthly';
-    const planPrice = selectedPlan === 'annual' ? 5000 : 500;
 
     try {
       if (!supabase) {
-        // Local preview simulation
-        if (balance < planPrice) {
-          Alert.alert(
-            t(language, 'membership'),
-            language === 'fr'
-              ? 'Solde insuffisant. Veuillez recharger votre solde pour souscrire.'
-              : 'Insufficient account balance. Please tap Add Funds to top up your balance.',
-            [
-              { text: t(language, 'cancel'), style: 'cancel' },
-              { text: t(language, 'addFunds'), onPress: () => router.push('/add-funds' as any) },
-            ]
-          );
-          setBusy(false);
-          return;
-        }
-
-        setBalance((prev) => Math.max(0, prev - planPrice));
-        setIsPremium(true);
-        setMessage(language === 'fr' ? 'Abonnement DDD Premium activé avec succès !' : 'DDD Premium membership activated!');
-        setBusy(false);
-        return;
+        throw new Error('Supabase client is unavailable.');
       }
 
       const idempotencyKey = `purchase-${session.user.id}-${selectedPlan}-${Date.now()}`;
@@ -104,7 +83,14 @@ export default function MembershipScreen() {
       });
 
       if (error || !data?.success) {
-        const errorMsg = error?.message || data?.error || 'Purchase failed.';
+        let errorMsg = error?.message || data?.error || 'Purchase failed.';
+        if (error && 'context' in error && error.context?.json) {
+          try {
+            const details = await error.context.json();
+            errorMsg = details?.error ?? details?.message ?? errorMsg;
+          } catch { /* Keep SDK error */ }
+        }
+
         if (errorMsg.includes('INSUFFICIENT_BALANCE') || data?.code === 'INSUFFICIENT_BALANCE') {
           Alert.alert(
             t(language, 'membership'),
@@ -128,9 +114,9 @@ export default function MembershipScreen() {
       if (data?.result?.expires_at) {
         setExpiresAt(new Date(data.result.expires_at).toLocaleDateString(language === 'fr' ? 'fr-FR' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' }));
       }
-      setMessage(language === 'fr' ? 'Abonnement DDD Premium activé avec succès !' : 'DDD Premium membership activated!');
+      setMessage(language === 'fr' ? 'Abonnement Daily Dew Premium activé avec succès !' : 'Daily Dew Premium membership activated!');
     } catch {
-      setMessage(language === 'fr' ? 'Erreur lors de l’achat. Veuillez réessayer.' : 'Purchase request could not be processed.');
+      setMessage(language === 'fr' ? 'Erreur lors de l’achat. Veuillez recharger votre solde.' : 'Purchase failed. Please check your account balance.');
     } finally {
       setBusy(false);
     }

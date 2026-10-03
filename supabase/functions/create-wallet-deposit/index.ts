@@ -50,7 +50,7 @@ Deno.serve(async (request) => {
     }
 
     const externalReference = `deposit-${crypto.randomUUID()}`;
-    const redirectUrl = Deno.env.get('WALLET_REDIRECT_URL') ?? 'devotionalapp://membership';
+    const redirectUrl = Deno.env.get('WALLET_REDIRECT_URL') ?? 'https://ptsministry.com/app/membership';
 
     // 1. Record pending payment_transactions row before provider request
     const admin = createClient(supabaseUrl, serviceKey);
