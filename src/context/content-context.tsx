@@ -1,4 +1,4 @@
-import { createContext, PropsWithChildren, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, PropsWithChildren, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { type Devotion } from '@/data/devotions';
@@ -46,6 +46,13 @@ export function ContentProvider({ children }: PropsWithChildren) {
   const [error, setError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
 
+  // Authoritative cloud content lock ref to prevent stale cache overwrites
+  const isCloudLoadedRef = useRef(false);
+
+  useEffect(() => {
+    isCloudLoadedRef.current = false;
+  }, [language, reloadToken, session]);
+
   // Network Event Listener
   useEffect(() => {
     const handleOnline = () => setNetworkStatus('online');
@@ -70,9 +77,12 @@ export function ContentProvider({ children }: PropsWithChildren) {
     async function hydrateCache() {
       try {
         const cachedRaw = await AsyncStorage.getItem(latestCacheKey(language));
-        if (cachedRaw && active) {
+        if (cachedRaw && active && !isCloudLoadedRef.current) {
           const parsed = JSON.parse(cachedRaw);
           if (parsed?.edition && Array.isArray(parsed?.devotions) && parsed.devotions.length > 0) {
+            // Guard: Do not overwrite if authoritative cloud content has already committed
+            if (isCloudLoadedRef.current) return;
+
             const isPremiumEdition = parsed.edition.access_level === 'premium';
             const currentUserId = session?.user?.id ?? null;
             const cachedUserId = parsed?.cachedUserId ?? null;
@@ -104,6 +114,9 @@ export function ContentProvider({ children }: PropsWithChildren) {
                 isAdminOrEditor = true;
               }
             }
+
+            // Guard check again after async subscription lookups
+            if (isCloudLoadedRef.current) return;
 
             // 1. Evaluate full content access (Subscriber OR Admin OR Editor)
             const hasFullAccess = isUserSubscribed || isAdminOrEditor;
@@ -207,6 +220,7 @@ export function ContentProvider({ children }: PropsWithChildren) {
 
           const checked = validateDevotions(nextDevotions);
           if (checked.valid.length > 0) {
+            isCloudLoadedRef.current = true; // Mark Cloud Content as Authoritatively Committed
             setDevotions(checked.valid);
             setEdition(fetchedEdition);
             setSource('cloud');
