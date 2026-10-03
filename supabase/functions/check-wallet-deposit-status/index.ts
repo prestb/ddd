@@ -20,7 +20,7 @@ Deno.serve(async (request) => {
   try {
     const apiKey = Deno.env.get('FAPSHI_API_KEY');
     const apiUser = Deno.env.get('FAPSHI_API_USER');
-    const baseUrl = Deno.env.get('FAPSHI_BASE_URL') ?? 'https://sandbox.fapshi.com';
+    const baseUrl = Deno.env.get('FAPSHI_BASE_URL') ?? 'https://live.fapshi.com';
     if (!apiKey || !apiUser) {
       console.error('check-wallet-deposit-status: Fapshi credentials missing in environment.');
       return json({ error: 'SERVER_CONFIGURATION_ERROR', message: 'Server configuration error.' }, 500);

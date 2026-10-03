@@ -33,7 +33,7 @@ Deno.serve(async (request) => {
   try {
     const apiKey = Deno.env.get('FAPSHI_API_KEY');
     const apiUser = Deno.env.get('FAPSHI_API_USER');
-    const baseUrl = Deno.env.get('FAPSHI_BASE_URL') ?? 'https://sandbox.fapshi.com';
+    const baseUrl = Deno.env.get('FAPSHI_BASE_URL') ?? 'https://live.fapshi.com';
     if (!apiKey || !apiUser) throw new Error('Fapshi is not configured on the server.');
 
     const body = await request.json();
