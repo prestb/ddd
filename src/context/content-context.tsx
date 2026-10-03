@@ -56,9 +56,23 @@ export function ContentProvider({ children }: PropsWithChildren) {
             const cachedUserId = parsed?.cachedUserId ?? null;
             const isOwnerMatch = Boolean(currentUserId && cachedUserId && currentUserId === cachedUserId);
 
+            // Verify active subscription status if session exists
+            let isUserSubscribed = false;
+            if (supabase && session && currentUserId && isOwnerMatch) {
+              const { data: subData } = await supabase
+                .from('subscriptions')
+                .select('status, expires_at')
+                .eq('user_id', currentUserId)
+                .maybeSingle();
+
+              if (subData?.status === 'active' && subData?.expires_at && new Date(subData.expires_at) > new Date()) {
+                isUserSubscribed = true;
+              }
+            }
+
             // ENTITLEMENT & ACCOUNT ISOLATION GUARD:
-            // If cached edition was fetched as Premium AND (session is signed out OR user ID mismatch)
-            const needsSanitization = cachedEntitlement === 'premium' && (!session || !isOwnerMatch);
+            // If cached payload was fetched as Premium, BUT current user is NOT an active verified subscriber
+            const needsSanitization = cachedEntitlement === 'premium' && (!session || !isOwnerMatch || !isUserSubscribed);
 
             if (isPremiumEdition || needsSanitization) {
               setEdition({

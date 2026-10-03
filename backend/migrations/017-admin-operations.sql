@@ -1,9 +1,10 @@
 -- UX-11 ADMIN OPERATIONS: Append-only Admin Audit Log Table
 -- Tracks administrative actions (user creation, role modifications, financial reviews) performed by Ministry Admins.
+-- Historical audit records survive administrative account removal (ON DELETE SET NULL).
 
 create table if not exists public.admin_audit_log (
   id uuid primary key default gen_random_uuid(),
-  admin_user_id uuid not null references public.profiles(id) on delete cascade,
+  admin_user_id uuid references public.profiles(id) on delete set null,
   action text not null,
   entity_type text not null,
   entity_id text default null,

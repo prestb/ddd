@@ -1,5 +1,4 @@
 import type { SupportedLanguage } from './localized-content';
-import { FRENCH_JULY_SAMPLE } from './french-july-sample';
 import { SHILOH_JULY_2026 } from './shiloh-july-2026';
 
 export type Devotion = {
@@ -32,15 +31,10 @@ const FALLBACK_DEVOTION: Devotion = SHILOH_JULY_2026[0] ?? {
 export function localizeDevotion(base: Devotion | null | undefined, index: number, language: SupportedLanguage): Devotion {
   const safeBase = base ?? DAILY_DEVOTIONS[index] ?? DAILY_DEVOTIONS[0] ?? FALLBACK_DEVOTION;
 
-  // Security Guard: If devotion is locked, preserve empty protected fields and only localize safe metadata
+  // Security Guard: If devotion is locked, preserve empty protected fields
   if (safeBase.isLocked) {
-    if (language === 'en') return safeBase;
-    const translated = FRENCH_JULY_SAMPLE[index];
-    if (!translated) return safeBase;
     return {
       ...safeBase,
-      weekday: translated.weekday?.fr ?? safeBase.weekday,
-      title: translated.title?.fr ?? safeBase.title,
       preview: '',
       meditation: '',
       wisdom: '',
@@ -50,20 +44,7 @@ export function localizeDevotion(base: Devotion | null | undefined, index: numbe
     };
   }
 
-  if (language === 'en') return safeBase;
-
-  const translated = FRENCH_JULY_SAMPLE[index];
-  if (!translated) return safeBase;
-
-  return {
-    ...safeBase,
-    weekday: translated.weekday?.fr ?? safeBase.weekday,
-    title: translated.title?.fr ?? safeBase.title,
-    preview: translated.preview?.fr ?? safeBase.preview,
-    meditation: translated.meditation?.fr ?? safeBase.meditation,
-    wisdom: translated.wisdom?.fr ?? safeBase.wisdom,
-    declaration: translated.declaration?.fr ?? safeBase.declaration,
-  };
+  return safeBase;
 }
 
 export function getLocalizedDevotion(index: number, language: SupportedLanguage): Devotion {

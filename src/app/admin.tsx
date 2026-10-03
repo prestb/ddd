@@ -167,9 +167,12 @@ export default function AdminScreen() {
 
   const loadUsers = useCallback(async () => {
     if (!supabase) return;
-    const { data, error } = await supabase.from('profiles').select('id, role, created_at, updated_at').order('created_at', { ascending: false });
-    if (!error && data) {
-      setUsersList(data);
+    const { data, error } = await supabase.functions.invoke('admin-users');
+    if (!error && data?.users) {
+      setUsersList(data.users);
+    } else {
+      const { data: profiles } = await supabase.from('profiles').select('id, role, created_at, updated_at').order('created_at', { ascending: false });
+      if (profiles) setUsersList(profiles.map((p) => ({ ...p, email: `${p.id.slice(0, 12)}...` })));
     }
   }, []);
 

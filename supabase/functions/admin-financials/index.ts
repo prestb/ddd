@@ -43,17 +43,23 @@ Deno.serve(async (request) => {
       return json({ error: 'FORBIDDEN', message: 'Only Ministry Administrators can access financial ledgers.' }, 403);
     }
 
-    // Query financial ledgers
+    // Query financial ledgers across all accounting tables
     const [
       { data: paymentTxs },
+      { data: walletTxs },
+      { data: subscriptionTxs },
       { data: donations },
       { data: activeSubscriptions },
       { data: walletBalances },
+      { data: subscriptionPlans },
     ] = await Promise.all([
       admin.from('payment_transactions').select('id, user_id, purpose, amount, currency, status, provider, provider_transaction_id, external_reference, created_at, metadata').order('created_at', { ascending: false }).limit(50),
+      admin.from('wallet_transactions').select('id, wallet_id, user_id, type, amount, balance_before, balance_after, reference, description, created_at, metadata').order('created_at', { ascending: false }).limit(50),
+      admin.from('subscription_transactions').select('id, subscription_id, user_id, plan_id, type, amount, currency, wallet_transaction_id, created_at, metadata').order('created_at', { ascending: false }).limit(50),
       admin.from('donations').select('id, user_id, amount, status, transaction_id, external_id, created_at, metadata').order('created_at', { ascending: false }).limit(50),
       admin.from('subscriptions').select('id, user_id, plan_id, status, started_at, expires_at, auto_renew').eq('status', 'active'),
       admin.from('wallets').select('user_id, balance, updated_at'),
+      admin.from('subscription_plans').select('id, name, duration_days, price_xaf, is_active'),
     ]);
 
     const totalSuccessfulDepositXaf = (paymentTxs ?? [])
@@ -64,6 +70,9 @@ Deno.serve(async (request) => {
       .filter((d) => d.status === 'successful')
       .reduce((acc, d) => acc + (d.amount || 0), 0);
 
+    const totalSubscriptionRevenueXaf = (subscriptionTxs ?? [])
+      .reduce((acc, stx) => acc + (stx.amount || 0), 0);
+
     const activeSubscribersCount = (activeSubscriptions ?? []).length;
     const totalWalletBalanceXaf = (walletBalances ?? []).reduce((acc, w) => acc + (w.balance || 0), 0);
 
@@ -72,14 +81,18 @@ Deno.serve(async (request) => {
       summary: {
         totalSuccessfulDepositXaf,
         totalDonationsXaf,
+        totalSubscriptionRevenueXaf,
         activeSubscribersCount,
         totalWalletBalanceXaf,
         recentTxCount: (paymentTxs ?? []).length,
       },
       paymentTransactions: paymentTxs ?? [],
+      walletTransactions: walletTxs ?? [],
+      subscriptionTransactions: subscriptionTxs ?? [],
       donations: donations ?? [],
       activeSubscriptions: activeSubscriptions ?? [],
       wallets: walletBalances ?? [],
+      subscriptionPlans: subscriptionPlans ?? [],
     });
   } catch (error) {
     console.error('admin-financials unhandled exception', error);

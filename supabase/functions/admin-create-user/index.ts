@@ -67,20 +67,32 @@ Deno.serve(async (request) => {
     const newUserId = createdUser.user.id;
 
     // 2. Set profile role
-    await admin.from('profiles').upsert({
+    const { error: profileError } = await admin.from('profiles').upsert({
       id: newUserId,
       role: requestedRole,
       updated_at: new Date().toISOString(),
     });
 
+    if (profileError) {
+      console.error('admin-create-user: Profile upsert failed, compensating auth user deletion', profileError);
+      await admin.auth.admin.deleteUser(newUserId);
+      return json({ error: 'PROFILE_CREATION_FAILED', message: 'Could not create user profile.' }, 500);
+    }
+
     // 3. Log action in admin_audit_log
-    await admin.from('admin_audit_log').insert({
+    const { error: auditError } = await admin.from('admin_audit_log').insert({
       admin_user_id: adminUser.id,
       action: 'create_user',
       entity_type: 'user',
       entity_id: newUserId,
       metadata: { created_email: email, role: requestedRole },
     });
+
+    if (auditError) {
+      console.error('admin-create-user: Audit log insertion failed, compensating auth user deletion', auditError);
+      await admin.auth.admin.deleteUser(newUserId);
+      return json({ error: 'AUDIT_LOG_FAILED', message: 'User creation failed due to audit constraint.' }, 500);
+    }
 
     return json({
       success: true,
