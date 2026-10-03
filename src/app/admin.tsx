@@ -90,6 +90,7 @@ export default function AdminScreen() {
   const [editions, setEditions] = useState<Edition[]>([]);
   const [devotions, setDevotions] = useState<Devotion[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingDevotions, setLoadingDevotions] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedEditionId, setSelectedEditionId] = useState<string | null>(null);
 
@@ -105,7 +106,10 @@ export default function AdminScreen() {
 
   // Users Management State
   const [usersList, setUsersList] = useState<{ id: string; role: string; email?: string; created_at?: string }[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [usersError, setUsersError] = useState<string | null>(null);
   const [showCreateUserModal, setShowCreateUserModal] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [createUserForm, setCreateUserForm] = useState({ email: '', password: '', role: 'reader' as 'reader' | 'editor' | 'admin' });
   const [editingUser, setEditingUser] = useState<{ id: string; role: string; email?: string } | null>(null);
 
@@ -171,12 +175,21 @@ export default function AdminScreen() {
 
   const loadUsers = useCallback(async () => {
     if (!supabase) return;
-    const { data, error } = await supabase.functions.invoke('admin-users');
-    if (!error && data?.users) {
-      setUsersList(data.users);
-    } else {
-      const { data: profiles } = await supabase.from('profiles').select('id, role, created_at, updated_at').order('created_at', { ascending: false });
-      if (profiles) setUsersList(profiles.map((p) => ({ ...p, email: `${p.id.slice(0, 12)}...` })));
+    setLoadingUsers(true);
+    setUsersError(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-users');
+      if (error || !data?.success) {
+        setUsersError(error?.message || data?.message || 'Unable to load user accounts.');
+        setUsersList([]);
+      } else {
+        setUsersList(data.users ?? []);
+      }
+    } catch {
+      setUsersError('Unable to load user accounts.');
+      setUsersList([]);
+    } finally {
+      setLoadingUsers(false);
     }
   }, []);
 
@@ -296,7 +309,9 @@ export default function AdminScreen() {
 
   const loadDevotions = async (editionId: string) => {
     if (!supabase) return;
+    setLoadingDevotions(true);
     const { data, error } = await supabase.from('devotions').select('*').eq('edition_id', editionId).order('day_number');
+    setLoadingDevotions(false);
     if (error) Alert.alert('Could not load meditations', error.message);
     else setDevotions((data ?? []) as Devotion[]);
   };
@@ -313,7 +328,14 @@ export default function AdminScreen() {
     setSaving(false);
 
     if (error || !data?.success) {
-      Alert.alert('User creation failed', error?.message || data?.message || 'Could not create user.');
+      let messageText = error?.message || data?.message || 'Could not create user.';
+      if (error && 'context' in error && error.context?.json) {
+        try {
+          const details = await error.context.json();
+          messageText = details?.message ?? details?.error ?? messageText;
+        } catch { /* Keep SDK error */ }
+      }
+      Alert.alert('User creation failed', messageText);
       return;
     }
 
@@ -418,6 +440,75 @@ export default function AdminScreen() {
     setEditionForm({ slug: '', title: '', theme: '', introduction: '', month: '', year: '', language: 'en' });
     await loadDashboard();
   };
+
+  const saveMeditation = async () => {
+    if (!supabase || !selectedEditionId) return;
+    const editingId = editingDevotionId;
+    const dayNumber = Number(form.day);
+    if (!dayNumber || dayNumber < 1 || dayNumber > 31 || !form.title.trim() || !form.meditation.trim() || !form.scriptureReference.trim()) {
+      Alert.alert('Missing information', 'Add a valid day number, title, Scripture reference, and meditation text.');
+      return;
+    }
+    setSaving(true);
+    const duplicateQuery = supabase.from('devotions').select('id').eq('edition_id', selectedEditionId).eq('day_number', dayNumber);
+    const { data: duplicateRows, error: duplicateError } = editingId ? await duplicateQuery.neq('id', editingId) : await duplicateQuery;
+    if (duplicateError) {
+      setSaving(false);
+      Alert.alert('Could not validate day', duplicateError.message);
+      return;
+    }
+    if (duplicateRows?.length) {
+      setSaving(false);
+      Alert.alert('Day already exists', `Day ${dayNumber} is already in this edition. Choose a different day number.`);
+      return;
+    }
+    const payload = {
+      edition_id: selectedEditionId,
+      day_number: dayNumber,
+      weekday: form.weekday.trim() || 'Daily',
+      title: form.title.trim(),
+      scripture_reference: form.scriptureReference.trim(),
+      scripture_text: form.scriptureText.trim() || null,
+      meditation: form.meditation.trim(),
+      further_studies: form.furtherStudies.split(',').map((item) => item.trim()).filter(Boolean),
+      wisdom_nugget: form.wisdom.trim() || null,
+      declaration: form.declaration.trim() || null,
+    };
+    const result = editingId
+      ? await supabase.from('devotions').update(payload).eq('id', editingId).select('id').maybeSingle()
+      : await supabase.from('devotions').insert(payload);
+    setSaving(false);
+    if (result.error) {
+      Alert.alert('Could not save meditation', result.error.message);
+      return;
+    }
+    setForm({ day: '', weekday: '', title: '', scriptureReference: '', scriptureText: '', meditation: '', furtherStudies: '', wisdom: '', declaration: '' });
+    setEditingDevotionId(null);
+    setShowComposer(false);
+    await loadDashboard();
+    await loadDevotions(selectedEditionId);
+    Alert.alert('Saved', `Day ${dayNumber} was ${editingId ? 'updated' : 'added'} successfully.`);
+  };
+
+  const deleteDevotion = (item: Devotion) =>
+    Alert.alert('Delete meditation?', item.title, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          if (!supabase) return;
+          const { error } = await supabase.from('devotions').delete().eq('id', item.id);
+          if (error) {
+            Alert.alert('Could not delete meditation', error.message);
+            return;
+          }
+          if (selectedEditionId) await loadDevotions(selectedEditionId);
+          await loadDashboard();
+          Alert.alert('Deleted', 'The meditation was removed from this edition.');
+        },
+      },
+    ]);
 
   const deleteEdition = (edition: Edition) =>
     Alert.alert('Delete month?', `This deletes ${edition.title} and all its meditations.`, [
@@ -785,42 +876,124 @@ export default function AdminScreen() {
                     </View>
                   )}
 
-                  {editions.map((editionItem) => (
-                    <View key={editionItem.id} style={[styles.editionCard, isDark && styles.darkCard]}>
-                      <View style={styles.editionHeader}>
-                        <View style={styles.editionIcon}>
-                          <AppIcon name="book.closed" size={20} tintColor={DewDesign.colors.terracotta} />
+                  {editions.map((editionItem) => {
+                    const isSelected = selectedEditionId === editionItem.id;
+                    return (
+                      <View key={editionItem.id} style={[styles.editionCard, isDark && styles.darkCard, isSelected && { borderColor: DewDesign.colors.forest, borderWidth: 2 }]}>
+                        <View style={styles.editionHeader}>
+                          <View style={styles.editionIcon}>
+                            <AppIcon name="book.closed" size={20} tintColor={DewDesign.colors.terracotta} />
+                          </View>
+                          <View style={styles.editionCopy}>
+                            <Text style={[styles.editionTitle, isDark && styles.darkInk]}>{editionItem.title}</Text>
+                            <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>{editionItem.theme}</Text>
+                          </View>
+                          <Pressable onPress={() => changeStatus(editionItem, editionItem.status === 'published' ? 'draft' : 'published')} style={[styles.statusButton, editionItem.status === 'published' && styles.publishButton]}>
+                            <Text style={[styles.statusButtonText, editionItem.status === 'published' && styles.publishButtonText]}>{editionItem.status.toUpperCase()}</Text>
+                          </Pressable>
                         </View>
-                        <View style={styles.editionCopy}>
-                          <Text style={[styles.editionTitle, isDark && styles.darkInk]}>{editionItem.title}</Text>
-                          <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>{editionItem.theme}</Text>
+
+                        <View style={styles.editionDetails}>
+                          <Text style={[styles.detailText, isDark && styles.darkMuted]}>{`${editionItem.devotionCount} meditations`}</Text>
+                          <Text style={[styles.detailText, isDark && styles.darkMuted]}>{`${editionItem.month}/${editionItem.year}`}</Text>
                         </View>
-                        <Pressable onPress={() => changeStatus(editionItem, editionItem.status === 'published' ? 'draft' : 'published')} style={[styles.statusButton, editionItem.status === 'published' && styles.publishButton]}>
-                          <Text style={[styles.statusButtonText, editionItem.status === 'published' && styles.publishButtonText]}>{editionItem.status.toUpperCase()}</Text>
-                        </Pressable>
-                      </View>
 
-                      <View style={styles.editionDetails}>
-                        <Text style={[styles.detailText, isDark && styles.darkMuted]}>{`${editionItem.devotionCount} meditations`}</Text>
-                        <Text style={[styles.detailText, isDark && styles.darkMuted]}>{`${editionItem.month}/${editionItem.year}`}</Text>
-                      </View>
+                        <View style={styles.statusActions}>
+                          <Pressable
+                            onPress={() => {
+                              if (isSelected) {
+                                setSelectedEditionId(null);
+                              } else {
+                                setSelectedEditionId(editionItem.id);
+                                loadDevotions(editionItem.id);
+                              }
+                            }}
+                            style={[styles.actionBtnPill, isSelected && { backgroundColor: DewDesign.colors.forest }]}>
+                            <AppIcon name="list.bullet" size={14} tintColor={isSelected ? '#FFFFFF' : DewDesign.colors.forest} />
+                            <Text style={[styles.actionBtnLabel, isSelected && { color: '#FFFFFF' }]}>
+                              {isSelected ? 'Close Meditations' : 'Meditations'}
+                            </Text>
+                          </Pressable>
+                          <Pressable onPress={() => { setEditingEditionId(editionItem.id); setEditionForm({ slug: editionItem.slug, title: editionItem.title, theme: editionItem.theme, introduction: editionItem.introduction ?? '', month: String(editionItem.month), year: String(editionItem.year), language: editionItem.language as 'en' | 'fr' }); setShowEditionComposer(true); }} style={styles.actionBtnPill}>
+                            <AppIcon name="pencil" size={14} tintColor={DewDesign.colors.forest} />
+                            <Text style={styles.actionBtnLabel}>Edit</Text>
+                          </Pressable>
+                          <Pressable onPress={() => deleteEdition(editionItem)} style={styles.actionBtnPill}>
+                            <AppIcon name="trash" size={14} tintColor={DewDesign.colors.terracotta} />
+                            <Text style={[styles.actionBtnLabel, { color: DewDesign.colors.terracotta }]}>Delete</Text>
+                          </Pressable>
+                        </View>
 
-                      <View style={styles.statusActions}>
-                        <Pressable onPress={() => { setSelectedEditionId(editionItem.id); loadDevotions(editionItem.id); }} style={styles.actionBtnPill}>
-                          <AppIcon name="list.bullet" size={14} tintColor={DewDesign.colors.forest} />
-                          <Text style={styles.actionBtnLabel}>Meditations</Text>
-                        </Pressable>
-                        <Pressable onPress={() => { setEditingEditionId(editionItem.id); setEditionForm({ slug: editionItem.slug, title: editionItem.title, theme: editionItem.theme, introduction: editionItem.introduction ?? '', month: String(editionItem.month), year: String(editionItem.year), language: editionItem.language as 'en' | 'fr' }); setShowEditionComposer(true); }} style={styles.actionBtnPill}>
-                          <AppIcon name="pencil" size={14} tintColor={DewDesign.colors.forest} />
-                          <Text style={styles.actionBtnLabel}>Edit</Text>
-                        </Pressable>
-                        <Pressable onPress={() => deleteEdition(editionItem)} style={styles.actionBtnPill}>
-                          <AppIcon name="trash" size={14} tintColor={DewDesign.colors.terracotta} />
-                          <Text style={[styles.actionBtnLabel, { color: DewDesign.colors.terracotta }]}>Delete</Text>
-                        </Pressable>
+                        {/* RENDERED SELECTED MEDITATIONS LIST BELOW SELECTED EDITION */}
+                        {isSelected && (
+                          <View style={{ marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: isDark ? DewDesign.colors.darkLine : DewDesign.colors.line }}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                              <Text style={[styles.sectionTitle, isDark && styles.darkInk, { fontSize: 15, marginBottom: 0 }]}>
+                                {`Meditations (${devotions.length})`}
+                              </Text>
+                              <Pressable
+                                onPress={() => {
+                                  setForm({ day: String(devotions.length + 1), weekday: 'Daily', title: '', scriptureReference: '', scriptureText: '', meditation: '', furtherStudies: '', wisdom: '', declaration: '' });
+                                  setEditingDevotionId(null);
+                                  setShowComposer(true);
+                                }}
+                                style={styles.actionBtnPill}>
+                                <AppIcon name="plus" size={12} tintColor={DewDesign.colors.forest} />
+                                <Text style={styles.actionBtnLabel}>Add Meditation</Text>
+                              </Pressable>
+                            </View>
+
+                            {loadingDevotions ? (
+                              <ActivityIndicator size="small" color={DewDesign.colors.forest} style={{ marginVertical: 14 }} />
+                            ) : devotions.length === 0 ? (
+                              <Text style={[styles.emptyText, isDark && styles.darkMuted, { marginVertical: 12, textAlign: 'left' }]}>
+                                No meditations have been added to this edition yet. Tap &quot;+ Add Meditation&quot; or &quot;Import PDF&quot; to add content.
+                              </Text>
+                            ) : (
+                              devotions.map((devotionItem) => (
+                                <View key={devotionItem.id} style={[styles.editionCard, isDark && styles.darkCard, { marginBottom: 8, padding: 12 }]}>
+                                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <View style={{ flex: 1, marginRight: 8 }}>
+                                      <Text style={[styles.editionTitle, isDark && styles.darkInk, { fontSize: 14 }]}>
+                                        {`Day ${devotionItem.day_number}: ${devotionItem.title}`}
+                                      </Text>
+                                      <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>
+                                        {devotionItem.scripture_reference}
+                                      </Text>
+                                    </View>
+                                    <View style={{ flexDirection: 'row', gap: 6 }}>
+                                      <Pressable
+                                        onPress={() => {
+                                          setEditingDevotionId(devotionItem.id);
+                                          setForm({
+                                            day: String(devotionItem.day_number),
+                                            weekday: devotionItem.weekday,
+                                            title: devotionItem.title,
+                                            scriptureReference: devotionItem.scripture_reference,
+                                            scriptureText: devotionItem.scripture_text ?? '',
+                                            meditation: devotionItem.meditation,
+                                            furtherStudies: (devotionItem.further_studies ?? []).join(', '),
+                                            wisdom: devotionItem.wisdom_nugget ?? '',
+                                            declaration: devotionItem.declaration ?? '',
+                                          });
+                                          setShowComposer(true);
+                                        }}
+                                        style={styles.actionBtnPill}>
+                                        <AppIcon name="pencil" size={12} tintColor={DewDesign.colors.forest} />
+                                      </Pressable>
+                                      <Pressable onPress={() => deleteDevotion(devotionItem)} style={styles.actionBtnPill}>
+                                        <AppIcon name="trash" size={12} tintColor={DewDesign.colors.terracotta} />
+                                      </Pressable>
+                                    </View>
+                                  </View>
+                                </View>
+                              ))
+                            )}
+                          </View>
+                        )}
                       </View>
-                    </View>
-                  ))}
+                    );
+                  })}
                 </>
               ) : adminTab === 'newsletters' ? (
                 /* TAB 2: NEWSLETTER STUDIO */
@@ -893,29 +1066,51 @@ export default function AdminScreen() {
                     ) : null}
                   </View>
 
-                  {usersList.map((userItem) => (
-                    <View key={userItem.id} style={[styles.editionCard, isDark && styles.darkCard, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.editionTitle, isDark && styles.darkInk]}>{userItem.email ?? `${userItem.id.slice(0, 18)}...`}</Text>
-                        <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>{`Role: ${userItem.role.toUpperCase()}`}</Text>
-                      </View>
+                  {loadingUsers ? (
+                    <ActivityIndicator size="small" color={DewDesign.colors.forest} style={{ marginVertical: 20 }} />
+                  ) : usersError ? (
+                    <View style={{ alignItems: 'center', paddingVertical: 18 }}>
+                      <Text style={[styles.errorText, { marginBottom: 12 }]}>{usersError}</Text>
+                      <Pressable onPress={loadUsers} style={styles.actionBtnPill}>
+                        <AppIcon name="refresh" size={12} tintColor={DewDesign.colors.forest} />
+                        <Text style={styles.actionBtnLabel}>Retry</Text>
+                      </Pressable>
+                    </View>
+                  ) : usersList.length === 0 ? (
+                    <View style={{ alignItems: 'center', paddingVertical: 18 }}>
+                      <Text style={[styles.emptyTitle, isDark && styles.darkInk, { fontSize: 16 }]}>No user accounts found</Text>
+                      <Text style={[styles.emptyText, isDark && styles.darkMuted, { marginBottom: 14 }]}>Tap &quot;Create User&quot; to add an account.</Text>
                       {role === 'admin' ? (
-                        <Pressable
-                          onPress={() => setEditingUser({ id: userItem.id, role: userItem.role, email: userItem.email })}
-                          style={styles.actionBtnPill}>
-                          <AppIcon name="pencil" size={12} tintColor={DewDesign.colors.forest} />
-                          <Text style={styles.actionBtnLabel}>Role</Text>
+                        <Pressable onPress={() => setShowCreateUserModal(true)} style={styles.primaryButton}>
+                          <Text style={styles.primaryButtonText}>Create User</Text>
                         </Pressable>
                       ) : null}
                     </View>
-                  ))}
+                  ) : (
+                    usersList.map((userItem) => (
+                      <View key={userItem.id} style={[styles.editionCard, isDark && styles.darkCard, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.editionTitle, isDark && styles.darkInk]}>{userItem.email ?? `${userItem.id.slice(0, 18)}...`}</Text>
+                          <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>{`Role: ${userItem.role.toUpperCase()}`}</Text>
+                        </View>
+                        {role === 'admin' ? (
+                          <Pressable
+                            onPress={() => setEditingUser({ id: userItem.id, role: userItem.role, email: userItem.email })}
+                            style={styles.actionBtnPill}>
+                            <AppIcon name="pencil" size={12} tintColor={DewDesign.colors.forest} />
+                            <Text style={styles.actionBtnLabel}>Role</Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
+                    ))
+                  )}
                 </View>
               ) : adminTab === 'finance' ? (
                 /* TAB 4: FINANCIAL LEDGER (ADMIN ONLY) */
                 <View style={[adminExtraStyles.adminPanel, isDark && styles.darkCard]}>
                   <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>Financial Ledgers & Revenue</Text>
 
-                  {/* Summary Metric Cards */}
+                  {/* Summary Metric Cards in 2x2 Grid */}
                   {financials?.summary ? (
                     <View style={adminExtraStyles.metricGrid}>
                       <View style={adminExtraStyles.metricCard}>
@@ -1008,8 +1203,12 @@ export default function AdminScreen() {
                   </View>
                 </View>
               ) : adminTab === 'analytics' ? (
+                /* TAB 5: APP ANALYTICS & DAILY STATS */
                 <View style={[adminExtraStyles.adminPanel, isDark && styles.darkCard]}>
                   <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{t(language, 'appAnalytics')}</Text>
+                  <Text style={[adminExtraStyles.panelIntro, isDark && styles.darkMuted]}>
+                    Aggregate reader activity from the last 30 days.
+                  </Text>
                   <View style={adminExtraStyles.metricGrid}>
                     <View style={adminExtraStyles.metricCard}>
                       <Text style={adminExtraStyles.metricValue}>{activeReaders}</Text>
@@ -1024,6 +1223,19 @@ export default function AdminScreen() {
                       <Text style={adminExtraStyles.metricLabel}>Reader rate</Text>
                     </View>
                   </View>
+
+                  <Text style={[adminExtraStyles.panelHeading, isDark && styles.darkInk, { marginTop: 18 }]}>Daily Activity (30 Days)</Text>
+                  {dailyOpens.map((item) => (
+                    <View key={item.day} style={[adminExtraStyles.activityRow, isDark && { borderColor: DewDesign.colors.darkLine }]}>
+                      <Text style={[styles.detailText, isDark && styles.darkMuted]}>{item.day}</Text>
+                      <Text style={[styles.detailText, isDark && styles.darkMuted]}>{`${item.count} app opens`}</Text>
+                    </View>
+                  ))}
+                  {!dailyOpens.length && (
+                    <Text style={[styles.emptyText, isDark && styles.darkMuted]}>
+                      {language === 'fr' ? 'Les statistiques apparaîtront lorsque les lecteurs ouvriront l’application.' : 'Analytics will appear as readers open the app.'}
+                    </Text>
+                  )}
                 </View>
               ) : null}
             </>
@@ -1087,14 +1299,23 @@ export default function AdminScreen() {
                   keyboardType="email-address"
                   style={[styles.formInput, isDark && styles.darkFormInput]}
                 />
-                <TextInput
-                  value={createUserForm.password}
-                  onChangeText={(v) => setCreateUserForm((c) => ({ ...c, password: v }))}
-                  placeholder="Temporary Password (min 6 chars)"
-                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
-                  secureTextEntry
-                  style={[styles.formInput, isDark && styles.darkFormInput]}
-                />
+                <View style={{ position: 'relative', marginBottom: 10 }}>
+                  <TextInput
+                    value={createUserForm.password}
+                    onChangeText={(v) => setCreateUserForm((c) => ({ ...c, password: v }))}
+                    placeholder="Temporary Password (min 6 chars)"
+                    placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                    secureTextEntry={!showPassword}
+                    style={[styles.formInput, isDark && styles.darkFormInput, { paddingRight: 44, marginBottom: 0 }]}
+                  />
+                  <Pressable
+                    onPress={() => setShowPassword((prev) => !prev)}
+                    style={{ position: 'absolute', right: 12, top: 12, height: 24, justifyContent: 'center' }}
+                    accessibilityRole="button"
+                    accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}>
+                    <AppIcon name={showPassword ? 'eye' : 'eye.slash'} size={18} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />
+                  </Pressable>
+                </View>
 
                 <Text style={[styles.fieldLabel, isDark && styles.darkMuted]}>Account Role</Text>
                 <View style={styles.formRow}>
@@ -1345,6 +1566,96 @@ export default function AdminScreen() {
             </View>
           </KeyboardAvoidingView>
         </Modal>
+
+        {/* Meditation Composer Modal */}
+        <Modal visible={showComposer} transparent animationType="slide" onRequestClose={() => setShowComposer(false)}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={adminExtraStyles.modalBackdrop}>
+            <View style={[adminExtraStyles.modalPanel, isDark && styles.darkCard]}>
+              <ScrollView style={adminExtraStyles.modalScroll} contentContainerStyle={adminExtraStyles.modalContent}>
+                <View style={styles.composerHeader}>
+                  <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{editingDevotionId ? 'Edit Meditation' : 'Add Meditation'}</Text>
+                  <Pressable onPress={() => setShowComposer(false)}>
+                    <AppIcon name="xmark" size={18} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />
+                  </Pressable>
+                </View>
+
+                <View style={styles.formRow}>
+                  <TextInput
+                    value={form.day}
+                    onChangeText={(v) => setForm((c) => ({ ...c, day: v }))}
+                    placeholder="Day #"
+                    placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                    keyboardType="number-pad"
+                    style={[styles.formInput, styles.formHalf, isDark && styles.darkFormInput]}
+                  />
+                  <TextInput
+                    value={form.weekday}
+                    onChangeText={(v) => setForm((c) => ({ ...c, weekday: v }))}
+                    placeholder="Weekday (e.g. Monday)"
+                    placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                    style={[styles.formInput, styles.formHalf, isDark && styles.darkFormInput]}
+                  />
+                </View>
+
+                <TextInput
+                  value={form.title}
+                  onChangeText={(v) => setForm((c) => ({ ...c, title: v }))}
+                  placeholder="Meditation Title"
+                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                  style={[styles.formInput, isDark && styles.darkFormInput]}
+                />
+                <TextInput
+                  value={form.scriptureReference}
+                  onChangeText={(v) => setForm((c) => ({ ...c, scriptureReference: v }))}
+                  placeholder="Scripture Reference (e.g. Psalm 119:105)"
+                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                  style={[styles.formInput, isDark && styles.darkFormInput]}
+                />
+                <TextInput
+                  value={form.scriptureText}
+                  onChangeText={(v) => setForm((c) => ({ ...c, scriptureText: v }))}
+                  placeholder="Full Scripture Passages (Optional)"
+                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                  multiline
+                  style={[styles.formInput, styles.formTextArea, isDark && styles.darkFormInput]}
+                />
+                <TextInput
+                  value={form.meditation}
+                  onChangeText={(v) => setForm((c) => ({ ...c, meditation: v }))}
+                  placeholder="Meditation Body"
+                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                  multiline
+                  style={[styles.formInput, styles.formTextAreaLarge, isDark && styles.darkFormInput]}
+                />
+                <TextInput
+                  value={form.wisdom}
+                  onChangeText={(v) => setForm((c) => ({ ...c, wisdom: v }))}
+                  placeholder="Wisdom Nugget"
+                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                  style={[styles.formInput, isDark && styles.darkFormInput]}
+                />
+                <TextInput
+                  value={form.declaration}
+                  onChangeText={(v) => setForm((c) => ({ ...c, declaration: v }))}
+                  placeholder="Declaration"
+                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                  style={[styles.formInput, isDark && styles.darkFormInput]}
+                />
+                <TextInput
+                  value={form.furtherStudies}
+                  onChangeText={(v) => setForm((c) => ({ ...c, furtherStudies: v }))}
+                  placeholder="Further Studies (comma separated)"
+                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                  style={[styles.formInput, isDark && styles.darkFormInput]}
+                />
+
+                <Pressable disabled={saving} onPress={saveMeditation} style={[styles.saveButton, saving && styles.disabledButton]}>
+                  <Text style={styles.publishButtonText}>{saving ? 'Saving...' : 'Save Meditation'}</Text>
+                </Pressable>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
       </SafeAreaView>
     </View>
   );
@@ -1413,6 +1724,7 @@ const styles = StyleSheet.create({
   denied: { backgroundColor: DewDesign.colors.surface, borderRadius: 16, alignItems: 'center', padding: 28, marginTop: 24, borderWidth: 1, borderColor: DewDesign.colors.line },
   emptyTitle: { color: DewDesign.colors.ink, fontSize: 18, fontWeight: '900', marginTop: 12, textAlign: 'center' },
   emptyText: { color: DewDesign.colors.body, fontSize: 13, lineHeight: 20, marginTop: 7, textAlign: 'center' },
+  errorText: { color: DewDesign.colors.terracotta, fontSize: 13, fontWeight: '700', textAlign: 'center' },
   primaryButton: { backgroundColor: DewDesign.colors.forest, borderRadius: 11, marginTop: 18, minHeight: 44, paddingHorizontal: 22, justifyContent: 'center' },
   primaryButtonText: { color: DewDesign.colors.white, fontSize: 13, fontWeight: '800' },
   addButton: { backgroundColor: DewDesign.colors.terracotta },
