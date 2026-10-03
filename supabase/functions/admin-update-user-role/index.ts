@@ -59,7 +59,7 @@ Deno.serve(async (request) => {
     // Update profile role
     const { error: updateError } = await admin
       .from('profiles')
-      .update({ role: newRole, updated_at: new Date().toISOString() })
+      .update({ role: newRole })
       .eq('id', targetUserId);
 
     if (updateError) {

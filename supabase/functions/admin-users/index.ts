@@ -37,16 +37,26 @@ Deno.serve(async (request) => {
 
     const admin = createClient(supabaseUrl, serviceKey);
 
-    // Verify caller is an administrator
+    // Verify caller is authorized (Ministry Admin by email or admin/editor profile role)
+    const ministryAdminEmail = Deno.env.get('EXPO_PUBLIC_MINISTRY_ADMIN_EMAIL')?.toLowerCase();
+    const isMinistryAdminByEmail = Boolean(ministryAdminEmail && adminUser.email?.toLowerCase() === ministryAdminEmail);
+
     const { data: adminProfile } = await admin.from('profiles').select('role').eq('id', adminUser.id).maybeSingle();
-    if (adminProfile?.role !== 'admin') {
-      return json({ error: 'FORBIDDEN', message: 'Only Ministry Administrators can list user accounts.' }, 403);
+    const isAuthorized = isMinistryAdminByEmail || ['admin', 'editor'].includes(adminProfile?.role ?? '');
+
+    if (!isAuthorized) {
+      return json({ error: 'FORBIDDEN', message: 'Only Ministry Administrators and Editors can view user accounts.' }, 403);
+    }
+
+    // Auto-heal admin role for primary ministry admin by email if missing
+    if (isMinistryAdminByEmail && adminProfile?.role !== 'admin') {
+      await admin.from('profiles').upsert({ id: adminUser.id, role: 'admin' });
     }
 
     // 1. Fetch profiles
     const { data: profiles, error: profilesError } = await admin
       .from('profiles')
-      .select('id, role, created_at, updated_at')
+      .select('id, role, created_at')
       .order('created_at', { ascending: false });
 
     if (profilesError) {
@@ -54,40 +64,41 @@ Deno.serve(async (request) => {
       return json({ error: 'DATABASE_ERROR', message: 'Could not retrieve user profiles.' }, 500);
     }
 
-    // 2. Fetch all Auth users via Admin API using paginated requests
+    // 2. Fetch all Auth users via Admin API safely
     const authUsersMap = new Map<string, any>();
-    let page = 1;
-    const perPage = 1000;
-    let hasMoreAuthUsers = true;
-
-    while (hasMoreAuthUsers) {
-      const { data: authUsersData, error: authUsersError } = await admin.auth.admin.listUsers({ page, perPage });
-
-      if (authUsersError) {
-        console.error('admin-users: Auth users list error', authUsersError);
-        return json({ error: 'AUTH_USERS_LIST_FAILED', message: 'Could not retrieve authentication accounts.' }, 500);
+    try {
+      const { data: authUsersData } = await admin.auth.admin.listUsers();
+      if (Array.isArray(authUsersData?.users)) {
+        authUsersData.users.forEach((u: any) => {
+          authUsersMap.set(u.id, u);
+        });
       }
-
-      const usersBatch = authUsersData?.users ?? [];
-      usersBatch.forEach((u: any) => {
-        authUsersMap.set(u.id, u);
-      });
-
-      if (usersBatch.length < perPage) {
-        hasMoreAuthUsers = false;
-      } else {
-        page++;
-      }
+    } catch (e) {
+      console.error('admin-users: Auth listUsers error', e);
     }
 
-    const usersList = (profiles ?? []).map((p) => {
-      const authU = authUsersMap.get(p.id);
+    // 3. Construct True Union: Auth Users ∪ Profiles
+    const allUserIds = new Set<string>();
+    (profiles ?? []).forEach((p) => allUserIds.add(p.id));
+    authUsersMap.forEach((_, id) => allUserIds.add(id));
+
+    const profilesMap = new Map<string, any>();
+    (profiles ?? []).forEach((p) => profilesMap.set(p.id, p));
+
+    const usersList = Array.from(allUserIds).map((id) => {
+      const authU = authUsersMap.get(id);
+      const profileP = profilesMap.get(id);
+
+      const hasAuth = Boolean(authU);
+      const hasProfile = Boolean(profileP);
+
       return {
-        id: p.id,
+        id,
         email: authU?.email ?? null,
-        auth_account_missing: !authU,
-        role: p.role ?? 'reader',
-        created_at: p.created_at ?? authU?.created_at ?? new Date().toISOString(),
+        auth_account_missing: !hasAuth,
+        profile_missing: !hasProfile,
+        role: profileP?.role ?? (id === adminUser.id && isMinistryAdminByEmail ? 'admin' : 'reader'),
+        created_at: profileP?.created_at ?? authU?.created_at ?? new Date().toISOString(),
       };
     });
 

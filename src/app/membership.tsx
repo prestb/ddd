@@ -8,6 +8,7 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/auth-context';
 import { useSettings } from '@/context/settings-context';
+import { useContent } from '@/context/content-context';
 import { t } from '@/lib/i18n';
 import { supabase } from '@/lib/supabase';
 
@@ -16,6 +17,7 @@ type PlanChoice = 'monthly' | 'annual';
 export default function MembershipScreen() {
   const { session } = useAuth();
   const { language, themeMode } = useSettings();
+  const { refresh: refreshContent } = useContent();
   const isDark = themeMode === 'dark';
 
   const [selectedPlan, setSelectedPlan] = useState<PlanChoice>('annual');
@@ -122,6 +124,7 @@ export default function MembershipScreen() {
 
       // Authoritative purchase completed
       setIsPremium(true);
+      refreshContent();
       if (data?.result?.remaining_balance !== undefined) setBalance(data.result.remaining_balance);
       if (data?.result?.expires_at) {
         setExpiresAt(new Date(data.result.expires_at).toLocaleDateString(language === 'fr' ? 'fr-FR' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' }));

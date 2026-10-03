@@ -106,7 +106,7 @@ export default function AdminScreen() {
   const [uploadingPdf, setUploadingPdf] = useState(false);
 
   // Users Management State
-  const [usersList, setUsersList] = useState<{ id: string; role: string; email?: string | null; auth_account_missing?: boolean; created_at?: string }[]>([]);
+  const [usersList, setUsersList] = useState<{ id: string; role: string; email?: string | null; auth_account_missing?: boolean; profile_missing?: boolean; created_at?: string }[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [usersError, setUsersError] = useState<string | null>(null);
   const [showCreateUserModal, setShowCreateUserModal] = useState(false);
@@ -143,7 +143,7 @@ export default function AdminScreen() {
     language: 'en',
   });
 
-  const [dailyOpens, setDailyOpens] = useState<{ day: string; count: number }[]>([]);
+  const [dailyOpens, setDailyOpens] = useState<{ day: string; opens: number; completions: number }[]>([]);
   const [activeReaders, setActiveReaders] = useState(0);
   const [completedCount, setCompletedCount] = useState(0);
   const [completionRate, setCompletionRate] = useState(0);
@@ -180,19 +180,57 @@ export default function AdminScreen() {
     setUsersError(null);
     try {
       const { data, error } = await supabase.functions.invoke('admin-users');
-      if (error || !data?.success) {
-        setUsersError(error?.message || data?.message || 'Could not retrieve authentication accounts.');
-        setUsersList([]);
+
+      if (!error && data?.success && Array.isArray(data?.users) && data.users.length > 0) {
+        setUsersList(data.users);
       } else {
-        setUsersList(data.users ?? []);
+        // Fallback: Query profiles table directly
+        const { data: profiles, error: profileErr } = await supabase
+          .from('profiles')
+          .select('id, role, created_at, updated_at')
+          .order('created_at', { ascending: false });
+
+        if (profileErr) {
+          let errorMsg = error?.message || data?.message || profileErr.message || 'Could not retrieve user accounts.';
+          if (error && 'context' in error && error.context?.json) {
+            try {
+              const details = await error.context.json();
+              errorMsg = details?.message ?? details?.error ?? errorMsg;
+            } catch { /* keep SDK error */ }
+          }
+          setUsersError(errorMsg);
+          setUsersList([]);
+        } else {
+          setUsersList((profiles ?? []).map((p) => ({
+            id: p.id,
+            email: p.id === session?.user?.id ? (session?.user?.email ?? null) : null,
+            role: p.role ?? 'reader',
+            created_at: p.created_at,
+          })));
+        }
       }
-    } catch {
-      setUsersError('Could not retrieve authentication accounts.');
-      setUsersList([]);
+    } catch (err: any) {
+      // Fallback: Query profiles table directly
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, role, created_at, updated_at')
+        .order('created_at', { ascending: false });
+
+      if (profiles && profiles.length > 0) {
+        setUsersList(profiles.map((p) => ({
+          id: p.id,
+          email: p.id === session?.user?.id ? (session?.user?.email ?? null) : null,
+          role: p.role ?? 'reader',
+          created_at: p.created_at,
+        })));
+      } else {
+        setUsersError(err instanceof Error ? err.message : 'Could not retrieve user accounts.');
+        setUsersList([]);
+      }
     } finally {
       setLoadingUsers(false);
     }
-  }, []);
+  }, [session]);
 
   const loadFinancials = useCallback(async (ledger: FinanceLedger = financeLedger, page = financePage) => {
     if (!supabase) return;
@@ -243,12 +281,23 @@ export default function AdminScreen() {
       );
     }
 
+    const nowForBoundary = new Date();
+    const startDateBoundary = new Date(
+      nowForBoundary.getFullYear(),
+      nowForBoundary.getMonth(),
+      nowForBoundary.getDate() - 29,
+      0,
+      0,
+      0,
+      0
+    );
+
     const [{ data: eventRows }, { data: campaignRows }, { count: optedInCount }] = await Promise.all([
       supabase
         .from('app_events')
         .select('created_at, user_id, event_type, metadata')
         .in('event_type', ['app_open', 'meditation_completed'])
-        .gte('created_at', new Date(Date.now() - 30 * 86400000).toISOString()),
+        .gte('created_at', startDateBoundary.toISOString()),
       supabase.from('newsletter_campaigns').select('id, subject, body, status, created_at').order('created_at', { ascending: false }),
       supabase.from('newsletter_subscribers').select('user_id', { count: 'exact', head: true }).eq('opted_in', true),
     ]);
@@ -260,38 +309,44 @@ export default function AdminScreen() {
       .order('created_at', { ascending: false });
     setPdfImports((importRows ?? []) as PdfImport[]);
 
-    const grouped = new Map<string, number>();
+    const groupedOpens = new Map<string, number>();
+    const groupedCompletions = new Map<string, number>();
     const readers = new Set<string>();
     const completedReaders = new Set<string>();
-    let completions = 0;
+    let totalCompletions = 0;
 
     (eventRows ?? []).forEach((event) => {
       const metadata = event.metadata && typeof event.metadata === 'object' ? (event.metadata as { installation_id?: unknown }) : null;
       const installationId = typeof metadata?.installation_id === 'string' ? metadata.installation_id : null;
       const actorId = event.user_id ?? installationId;
       if (actorId) readers.add(actorId);
-      if (event.event_type === 'app_open') grouped.set(event.created_at.slice(0, 10), (grouped.get(event.created_at.slice(0, 10)) ?? 0) + 1);
-      if (event.event_type === 'meditation_completed') {
-        completions += 1;
+
+      const dayIso = event.created_at.slice(0, 10);
+
+      if (event.event_type === 'app_open') {
+        groupedOpens.set(dayIso, (groupedOpens.get(dayIso) ?? 0) + 1);
+      } else if (event.event_type === 'meditation_completed') {
+        totalCompletions += 1;
+        groupedCompletions.set(dayIso, (groupedCompletions.get(dayIso) ?? 0) + 1);
         if (actorId) completedReaders.add(actorId);
       }
     });
 
-    // Build explicit last-30-calendar-days dataset (populating missing days with count = 0)
-    const days30: { day: string; count: number }[] = [];
-    const now = new Date();
+    // Build explicit last-30-calendar-days dataset (populating missing days with 0 opens and 0 completions)
+    const days30: { day: string; opens: number; completions: number }[] = [];
     for (let i = 0; i < 30; i++) {
-      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+      const d = new Date(nowForBoundary.getFullYear(), nowForBoundary.getMonth(), nowForBoundary.getDate() - i);
       const isoKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       const formatted = d.toLocaleDateString(language === 'fr' ? 'fr-FR' : 'en-US', { month: 'short', day: 'numeric', year: 'numeric' });
       days30.push({
         day: formatted,
-        count: grouped.get(isoKey) ?? 0,
+        opens: groupedOpens.get(isoKey) ?? 0,
+        completions: groupedCompletions.get(isoKey) ?? 0,
       });
     }
 
     setActiveReaders(readers.size);
-    setCompletedCount(completions);
+    setCompletedCount(totalCompletions);
     setCompletionRate(readers.size ? Math.round((completedReaders.size / readers.size) * 100) : 0);
     setDailyOpens(days30);
     setCampaigns((campaignRows ?? []) as typeof campaigns);
@@ -852,13 +907,28 @@ export default function AdminScreen() {
                   <View style={styles.composerHeader}>
                     <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>Published Editions</Text>
                     <View style={{ flexDirection: 'row', gap: 8 }}>
-                      <Pressable disabled={uploadingPdf} onPress={importPdf} style={styles.actionBtnPill}>
-                        <AppIcon name="arrow.up.doc" size={14} tintColor={DewDesign.colors.forest} />
-                        <Text style={styles.actionBtnLabel}>{uploadingPdf ? 'Uploading...' : 'Import PDF'}</Text>
+                      <Pressable
+                        disabled={uploadingPdf}
+                        onPress={importPdf}
+                        style={[styles.iconPillButton, isDark && styles.darkIconPillButton]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Import PDF">
+                        {uploadingPdf ? (
+                          <ActivityIndicator size="small" color={DewDesign.colors.forest} />
+                        ) : (
+                          <AppIcon name="arrow.up.doc" size={18} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
+                        )}
                       </Pressable>
-                      <Pressable onPress={() => { setEditingEditionId(null); setEditionForm({ slug: '', title: '', theme: '', introduction: '', month: '', year: '', language: 'en' }); setShowEditionComposer(true); }} style={styles.actionBtnPill}>
-                        <AppIcon name="plus" size={14} tintColor={DewDesign.colors.forest} />
-                        <Text style={styles.actionBtnLabel}>New Month</Text>
+                      <Pressable
+                        onPress={() => {
+                          setEditingEditionId(null);
+                          setEditionForm({ slug: '', title: '', theme: '', introduction: '', month: '', year: '', language: 'en' });
+                          setShowEditionComposer(true);
+                        }}
+                        style={[styles.iconPillButton, isDark && styles.darkIconPillButton]}
+                        accessibilityRole="button"
+                        accessibilityLabel="New Month">
+                        <AppIcon name="plus" size={18} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
                       </Pressable>
                     </View>
                   </View>
@@ -1087,9 +1157,12 @@ export default function AdminScreen() {
                   <View style={styles.composerHeader}>
                     <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>User Accounts & Roles</Text>
                     {role === 'admin' ? (
-                      <Pressable onPress={() => setShowCreateUserModal(true)} style={styles.actionBtnPill}>
-                        <AppIcon name="plus" size={14} tintColor={DewDesign.colors.forest} />
-                        <Text style={styles.actionBtnLabel}>Create User</Text>
+                      <Pressable
+                        onPress={() => setShowCreateUserModal(true)}
+                        style={[styles.iconPillButton, isDark && styles.darkIconPillButton]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Create User">
+                        <AppIcon name="plus" size={18} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
                       </Pressable>
                     ) : null}
                   </View>
@@ -1268,7 +1341,10 @@ export default function AdminScreen() {
                   {dailyOpens.map((item) => (
                     <View key={item.day} style={[adminExtraStyles.activityRow, isDark && { borderColor: DewDesign.colors.darkLine }]}>
                       <Text style={[styles.detailText, isDark && styles.darkMuted]}>{item.day}</Text>
-                      <Text style={[styles.detailText, isDark && styles.darkMuted]}>{`${item.count} opens`}</Text>
+                      <View style={{ flexDirection: 'row', gap: 12 }}>
+                        <Text style={[styles.detailText, isDark && styles.darkMuted]}>{`${item.opens} opens`}</Text>
+                        <Text style={[styles.detailText, { color: DewDesign.colors.forest, fontWeight: '700' }]}>{`${item.completions} completions`}</Text>
+                      </View>
                     </View>
                   ))}
                   {!dailyOpens.length && (

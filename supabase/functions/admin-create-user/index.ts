@@ -70,12 +70,18 @@ Deno.serve(async (request) => {
     const { error: profileError } = await admin.from('profiles').upsert({
       id: newUserId,
       role: requestedRole,
-      updated_at: new Date().toISOString(),
     });
 
     if (profileError) {
-      console.error('admin-create-user: Profile upsert failed, compensating auth user deletion', profileError);
-      await admin.auth.admin.deleteUser(newUserId);
+      console.error('admin-create-user: Profile upsert failed, attempting Auth user deletion', profileError);
+      const { error: deleteError } = await admin.auth.admin.deleteUser(newUserId);
+      if (deleteError) {
+        console.error('admin-create-user: Compensation deletion failed during profile error', deleteError);
+        return json({
+          error: 'USER_COMPENSATION_FAILED',
+          message: 'User account creation failed, and temporary account cleanup failed. Please check administrative records.',
+        }, 500);
+      }
       return json({ error: 'PROFILE_CREATION_FAILED', message: 'Could not create user profile.' }, 500);
     }
 
@@ -89,8 +95,15 @@ Deno.serve(async (request) => {
     });
 
     if (auditError) {
-      console.error('admin-create-user: Audit log insertion failed, compensating auth user deletion', auditError);
-      await admin.auth.admin.deleteUser(newUserId);
+      console.error('admin-create-user: Audit log insertion failed, attempting Auth user deletion', auditError);
+      const { error: deleteError } = await admin.auth.admin.deleteUser(newUserId);
+      if (deleteError) {
+        console.error('admin-create-user: Compensation deletion failed during audit error', deleteError);
+        return json({
+          error: 'USER_COMPENSATION_FAILED',
+          message: 'User creation failed due to audit constraint, and temporary account cleanup failed. Please check administrative records.',
+        }, 500);
+      }
       return json({ error: 'AUDIT_LOG_FAILED', message: 'User creation could not be completed because the administrative audit record could not be saved.' }, 500);
     }
 
