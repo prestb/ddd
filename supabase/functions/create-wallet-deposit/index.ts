@@ -88,7 +88,7 @@ Deno.serve(async (request) => {
         status: 'pending',
         metadata: {
           phone: normalizedPhone,
-          provider_method: providerChoice,
+          provider_method: rawProvider,
           medium,
           email: user.email,
         },
@@ -139,7 +139,7 @@ Deno.serve(async (request) => {
         provider_transaction_id: result.transId,
         metadata: {
           phone: normalizedPhone,
-          provider_method: providerChoice,
+          provider_method: rawProvider,
           medium,
           email: user.email,
           direct_pay_response: result,
