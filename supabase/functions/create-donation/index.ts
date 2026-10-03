@@ -48,8 +48,11 @@ Deno.serve(async (request) => {
       return json({ error: 'Enter a valid 9-digit Cameroon Mobile Money phone number starting with 6 (e.g., 670000000).' }, 400);
     }
 
-    const providerChoice = body?.provider === 'orange' ? 'orange' : 'mtn';
-    const medium = providerChoice === 'orange' ? 'orange money' : 'mobile money';
+    const rawProvider = body?.provider;
+    if (rawProvider !== 'mtn' && rawProvider !== 'orange') {
+      return json({ error: 'INVALID_PROVIDER', message: 'Select MTN Mobile Money or Orange Money.' }, 400);
+    }
+    const medium = rawProvider === 'orange' ? 'orange money' : 'mobile money';
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -69,8 +72,26 @@ Deno.serve(async (request) => {
     }
 
     const externalId = `donation-${crypto.randomUUID()}`;
+    const admin = createClient(supabaseUrl, serviceKey);
 
-    // 1. Initiate Fapshi Direct Pay request
+    // 1. Record pending donation row FIRST before provider Direct Pay request
+    const { data: pendingDonation, error: insertError } = await admin
+      .from('donations')
+      .insert({
+        user_id: userId,
+        external_id: externalId,
+        amount,
+        status: 'pending',
+      })
+      .select('id')
+      .single();
+
+    if (insertError) {
+      console.error('Could not create pending donation row', insertError);
+      throw new Error('Could not record donation transaction.');
+    }
+
+    // 2. Initiate Fapshi Direct Pay request
     const response = await fetch(`${baseUrl.replace(/\/$/, '')}/direct-pay`, {
       method: 'POST',
       headers: { apiuser: apiUser, apikey: apiKey, 'Content-Type': 'application/json' },
@@ -92,23 +113,20 @@ Deno.serve(async (request) => {
     if (!response.ok || !result?.transId) {
       const providerMessage = result?.message || rawResponse || 'No response body was returned by Fapshi.';
       console.error(`Fapshi Direct Pay donation failed: HTTP ${response.status} - ${providerMessage}`);
+
+      await admin
+        .from('donations')
+        .update({ status: 'failed' })
+        .eq('id', pendingDonation.id);
+
       throw new Error(`Fapshi HTTP ${response.status}: ${providerMessage}`);
     }
 
-    // 2. Insert pending donation record
-    const admin = createClient(supabaseUrl, serviceKey);
-    const { error: insertError } = await admin.from('donations').insert({
-      user_id: userId,
-      external_id: externalId,
-      transaction_id: result.transId,
-      amount,
-      status: 'pending',
-    });
-
-    if (insertError) {
-      console.error('Could not record donation', insertError);
-      throw new Error('Payment started, but the transaction could not be recorded.');
-    }
+    // 3. Update donation row with provider transaction_id
+    await admin
+      .from('donations')
+      .update({ transaction_id: result.transId })
+      .eq('id', pendingDonation.id);
 
     return json({
       success: true,

@@ -49,8 +49,11 @@ Deno.serve(async (request) => {
       return json({ error: 'Enter a valid 9-digit Cameroon Mobile Money phone number starting with 6 (e.g., 670000000).' }, 400);
     }
 
-    const providerChoice = body?.provider === 'orange' ? 'orange' : 'mtn';
-    const medium = providerChoice === 'orange' ? 'orange money' : 'mobile money';
+    const rawProvider = body?.provider;
+    if (rawProvider !== 'mtn' && rawProvider !== 'orange') {
+      return json({ error: 'INVALID_PROVIDER', message: 'Select MTN Mobile Money or Orange Money.' }, 400);
+    }
+    const medium = rawProvider === 'orange' ? 'orange money' : 'mobile money';
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;

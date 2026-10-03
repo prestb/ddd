@@ -66,20 +66,19 @@ export const walletFundingService = {
       return { status: 'pending' };
     }
 
-    const { data, error } = await supabase
-      .from('payment_transactions')
-      .select('status, amount, provider_transaction_id')
-      .or(`provider_transaction_id.eq.${transId},external_reference.eq.${transId}`)
-      .maybeSingle();
+    try {
+      const { data, error } = await supabase.functions.invoke('check-wallet-deposit-status', {
+        body: { transId },
+      });
 
-    if (!error && data?.status) {
-      const mappedStatus =
-        data.status === 'successful' || data.status === 'SUCCESS'
-          ? 'successful'
-          : data.status === 'failed' || data.status === 'cancelled'
-          ? 'failed'
-          : 'pending';
-      return { status: mappedStatus, amount: data.amount };
+      if (!error && data?.status) {
+        return {
+          status: data.status,
+          amount: data.amount,
+        };
+      }
+    } catch {
+      // Fallback
     }
 
     return { status: 'pending' };
