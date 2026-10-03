@@ -3,7 +3,7 @@ import AppBottomNav from '@/components/app-bottom-nav';
 import DailyDewHeader from '@/components/daily-dew-header';
 import { DewDesign } from '@/constants/design';
 import { router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/auth-context';
@@ -115,6 +115,7 @@ export default function AddFundsScreen() {
   const [transId, setTransId] = useState<string | null>(null);
   const [updatedBalance, setUpdatedBalance] = useState<number | null>(null);
 
+  const isCheckingRef = useRef(false);
   const amount = customAmountText ? (parseInt(customAmountText, 10) || 0) : selectedAmount;
 
   const handleSelectPreset = (val: number) => {
@@ -160,7 +161,8 @@ export default function AddFundsScreen() {
   };
 
   const handleVerifyBackendStatus = useCallback(async () => {
-    if (!transId) return;
+    if (!transId || isCheckingRef.current) return;
+    isCheckingRef.current = true;
     setBusy(true);
 
     try {
@@ -179,8 +181,8 @@ export default function AddFundsScreen() {
       } else if (result.status === 'verification_error') {
         setErrorMessage(
           language === 'fr'
-            ? "Nous n'avons pas pu vérifier le statut du paiement pour le moment. Veuillez réessayer."
-            : "We couldn't verify the payment status right now. Please try again."
+            ? 'Le statut du paiement est temporairement indisponible. Nous continuerons à vérifier automatiquement.'
+            : 'Payment status is temporarily unavailable. We’ll keep checking automatically.'
         );
       } else {
         // Still pending
@@ -193,10 +195,11 @@ export default function AddFundsScreen() {
     } catch {
       setErrorMessage(
         language === 'fr'
-          ? "Nous n'avons pas pu vérifier le statut du paiement pour le moment. Veuillez réessayer."
-          : "We couldn't verify the payment status right now. Please try again."
+          ? 'Le statut du paiement est temporairement indisponible. Nous continuerons à vérifier automatiquement.'
+          : 'Payment status is temporarily unavailable. We’ll keep checking automatically.'
       );
     } finally {
+      isCheckingRef.current = false;
       setBusy(false);
     }
   }, [amount, language, session, transId]);
@@ -217,7 +220,9 @@ export default function AddFundsScreen() {
         clearInterval(interval);
         return;
       }
-      await handleVerifyBackendStatus();
+      if (active) {
+        await handleVerifyBackendStatus();
+      }
     }, 3000);
 
     return () => {
