@@ -105,13 +105,13 @@ export default function AdminScreen() {
   const [uploadingPdf, setUploadingPdf] = useState(false);
 
   // Users Management State
-  const [usersList, setUsersList] = useState<{ id: string; role: string; email?: string; created_at?: string }[]>([]);
+  const [usersList, setUsersList] = useState<{ id: string; role: string; email?: string | null; auth_account_missing?: boolean; created_at?: string }[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [usersError, setUsersError] = useState<string | null>(null);
   const [showCreateUserModal, setShowCreateUserModal] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [createUserForm, setCreateUserForm] = useState({ email: '', password: '', role: 'reader' as 'reader' | 'editor' | 'admin' });
-  const [editingUser, setEditingUser] = useState<{ id: string; role: string; email?: string } | null>(null);
+  const [editingUser, setEditingUser] = useState<{ id: string; role: string; email?: string | null } | null>(null);
 
   // Financials State
   const [financials, setFinancials] = useState<any>(null);
@@ -180,13 +180,13 @@ export default function AdminScreen() {
     try {
       const { data, error } = await supabase.functions.invoke('admin-users');
       if (error || !data?.success) {
-        setUsersError(error?.message || data?.message || 'Unable to load user accounts.');
+        setUsersError(error?.message || data?.message || 'Could not retrieve authentication accounts.');
         setUsersList([]);
       } else {
         setUsersList(data.users ?? []);
       }
     } catch {
-      setUsersError('Unable to load user accounts.');
+      setUsersError('Could not retrieve authentication accounts.');
       setUsersList([]);
     } finally {
       setLoadingUsers(false);
@@ -276,13 +276,26 @@ export default function AdminScreen() {
       }
     });
 
+    // Build explicit last-30-calendar-days dataset (populating missing days with count = 0)
+    const days30: { day: string; count: number }[] = [];
+    const now = new Date();
+    for (let i = 0; i < 30; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+      const isoKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const formatted = d.toLocaleDateString(language === 'fr' ? 'fr-FR' : 'en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      days30.push({
+        day: formatted,
+        count: grouped.get(isoKey) ?? 0,
+      });
+    }
+
     setActiveReaders(readers.size);
     setCompletedCount(completions);
     setCompletionRate(readers.size ? Math.round((completedReaders.size / readers.size) * 100) : 0);
-    setDailyOpens(Array.from(grouped.entries()).map(([day, count]) => ({ day, count })).sort((a, b) => b.day.localeCompare(a.day)));
+    setDailyOpens(days30);
     setCampaigns((campaignRows ?? []) as typeof campaigns);
     setLoading(false);
-  }, [session]);
+  }, [session, language]);
 
   useEffect(() => {
     loadDashboard();
@@ -328,7 +341,7 @@ export default function AdminScreen() {
     setSaving(false);
 
     if (error || !data?.success) {
-      let messageText = error?.message || data?.message || 'Could not create user.';
+      let messageText = error?.message || data?.message || 'Could not create user account.';
       if (error && 'context' in error && error.context?.json) {
         try {
           const details = await error.context.json();
@@ -341,6 +354,7 @@ export default function AdminScreen() {
 
     Alert.alert('User created', `Account for ${createUserForm.email} created as ${createUserForm.role}.`);
     setShowCreateUserModal(false);
+    setShowPassword(false);
     setCreateUserForm({ email: '', password: '', role: 'reader' });
     await loadUsers();
   };
@@ -1090,8 +1104,12 @@ export default function AdminScreen() {
                     usersList.map((userItem) => (
                       <View key={userItem.id} style={[styles.editionCard, isDark && styles.darkCard, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
                         <View style={{ flex: 1 }}>
-                          <Text style={[styles.editionTitle, isDark && styles.darkInk]}>{userItem.email ?? `${userItem.id.slice(0, 18)}...`}</Text>
-                          <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>{`Role: ${userItem.role.toUpperCase()}`}</Text>
+                          <Text style={[styles.editionTitle, isDark && styles.darkInk]}>
+                            {userItem.email ?? (language === 'fr' ? 'Compte d’authentification manquant' : 'Authentication account missing')}
+                          </Text>
+                          <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>
+                            {userItem.auth_account_missing ? 'PROFILE ONLY' : `Role: ${userItem.role.toUpperCase()}`}
+                          </Text>
                         </View>
                         {role === 'admin' ? (
                           <Pressable
@@ -1228,7 +1246,7 @@ export default function AdminScreen() {
                   {dailyOpens.map((item) => (
                     <View key={item.day} style={[adminExtraStyles.activityRow, isDark && { borderColor: DewDesign.colors.darkLine }]}>
                       <Text style={[styles.detailText, isDark && styles.darkMuted]}>{item.day}</Text>
-                      <Text style={[styles.detailText, isDark && styles.darkMuted]}>{`${item.count} app opens`}</Text>
+                      <Text style={[styles.detailText, isDark && styles.darkMuted]}>{`${item.count} opens`}</Text>
                     </View>
                   ))}
                   {!dailyOpens.length && (
@@ -1280,13 +1298,13 @@ export default function AdminScreen() {
         </Modal>
 
         {/* Create User Modal */}
-        <Modal visible={showCreateUserModal} transparent animationType="slide" onRequestClose={() => setShowCreateUserModal(false)}>
+        <Modal visible={showCreateUserModal} transparent animationType="slide" onRequestClose={() => { setShowCreateUserModal(false); setShowPassword(false); }}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={adminExtraStyles.modalBackdrop}>
             <View style={[adminExtraStyles.modalPanel, isDark && styles.darkCard]}>
               <ScrollView style={adminExtraStyles.modalScroll} contentContainerStyle={adminExtraStyles.modalContent}>
                 <View style={styles.composerHeader}>
                   <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>Create New User Account</Text>
-                  <Pressable onPress={() => setShowCreateUserModal(false)}>
+                  <Pressable onPress={() => { setShowCreateUserModal(false); setShowPassword(false); }}>
                     <AppIcon name="xmark" size={18} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />
                   </Pressable>
                 </View>
@@ -1306,11 +1324,11 @@ export default function AdminScreen() {
                     placeholder="Temporary Password (min 6 chars)"
                     placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
                     secureTextEntry={!showPassword}
-                    style={[styles.formInput, isDark && styles.darkFormInput, { paddingRight: 44, marginBottom: 0 }]}
+                    style={[styles.formInput, isDark && styles.darkFormInput, { paddingRight: 48, marginBottom: 0 }]}
                   />
                   <Pressable
                     onPress={() => setShowPassword((prev) => !prev)}
-                    style={{ position: 'absolute', right: 12, top: 12, height: 24, justifyContent: 'center' }}
+                    style={{ position: 'absolute', right: 0, top: 0, width: 44, height: 44, justifyContent: 'center', alignItems: 'center' }}
                     accessibilityRole="button"
                     accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}>
                     <AppIcon name={showPassword ? 'eye' : 'eye.slash'} size={18} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />

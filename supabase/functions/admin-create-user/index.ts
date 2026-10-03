@@ -61,7 +61,7 @@ Deno.serve(async (request) => {
 
     if (createUserError || !createdUser?.user) {
       console.error('admin-create-user: Auth creation error', createUserError);
-      return json({ error: 'USER_CREATION_FAILED', message: createUserError?.message || 'Could not create user.' }, 400);
+      return json({ error: 'USER_CREATION_FAILED', message: createUserError?.message || 'Could not create user account.' }, 400);
     }
 
     const newUserId = createdUser.user.id;
@@ -91,7 +91,7 @@ Deno.serve(async (request) => {
     if (auditError) {
       console.error('admin-create-user: Audit log insertion failed, compensating auth user deletion', auditError);
       await admin.auth.admin.deleteUser(newUserId);
-      return json({ error: 'AUDIT_LOG_FAILED', message: 'User creation failed due to audit constraint.' }, 500);
+      return json({ error: 'AUDIT_LOG_FAILED', message: 'User creation could not be completed because the administrative audit record could not be saved.' }, 500);
     }
 
     return json({

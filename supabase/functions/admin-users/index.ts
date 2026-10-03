@@ -54,21 +54,38 @@ Deno.serve(async (request) => {
       return json({ error: 'DATABASE_ERROR', message: 'Could not retrieve user profiles.' }, 500);
     }
 
-    // 2. Fetch Auth users via Admin API
-    const { data: authUsersData, error: authUsersError } = await admin.auth.admin.listUsers();
-
+    // 2. Fetch all Auth users via Admin API using paginated requests
     const authUsersMap = new Map<string, any>();
-    if (!authUsersError && Array.isArray(authUsersData?.users)) {
-      authUsersData.users.forEach((u: any) => {
+    let page = 1;
+    const perPage = 1000;
+    let hasMoreAuthUsers = true;
+
+    while (hasMoreAuthUsers) {
+      const { data: authUsersData, error: authUsersError } = await admin.auth.admin.listUsers({ page, perPage });
+
+      if (authUsersError) {
+        console.error('admin-users: Auth users list error', authUsersError);
+        return json({ error: 'AUTH_USERS_LIST_FAILED', message: 'Could not retrieve authentication accounts.' }, 500);
+      }
+
+      const usersBatch = authUsersData?.users ?? [];
+      usersBatch.forEach((u: any) => {
         authUsersMap.set(u.id, u);
       });
+
+      if (usersBatch.length < perPage) {
+        hasMoreAuthUsers = false;
+      } else {
+        page++;
+      }
     }
 
     const usersList = (profiles ?? []).map((p) => {
       const authU = authUsersMap.get(p.id);
       return {
         id: p.id,
-        email: authU?.email ?? 'anonymous',
+        email: authU?.email ?? null,
+        auth_account_missing: !authU,
         role: p.role ?? 'reader',
         created_at: p.created_at ?? authU?.created_at ?? new Date().toISOString(),
       };
