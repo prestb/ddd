@@ -51,7 +51,6 @@ export function ContentProvider({ children }: PropsWithChildren) {
           const parsed = JSON.parse(cachedRaw);
           if (parsed?.edition && Array.isArray(parsed?.devotions) && parsed.devotions.length > 0) {
             const isPremiumEdition = parsed.edition.access_level === 'premium';
-            const cachedEntitlement = parsed?.cachedUserEntitlement ?? 'free';
             const currentUserId = session?.user?.id ?? null;
             const cachedUserId = parsed?.cachedUserId ?? null;
             const isOwnerMatch = Boolean(currentUserId && cachedUserId && currentUserId === cachedUserId);
@@ -70,18 +69,22 @@ export function ContentProvider({ children }: PropsWithChildren) {
               }
             }
 
-            // ENTITLEMENT & ACCOUNT ISOLATION GUARD:
-            // If cached payload was fetched as Premium, BUT current user is NOT an active verified subscriber
-            const needsSanitization = cachedEntitlement === 'premium' && (!session || !isOwnerMatch || !isUserSubscribed);
+            // 1. Evaluate active subscriber entitlement
+            const hasFullAccess = isUserSubscribed;
 
-            if (isPremiumEdition || needsSanitization) {
+            // 2. Determine if sanitization is needed for Free / non-entitled or mismatched users
+            const isOwnerMismatch = Boolean(cachedUserId && (!session || !isOwnerMatch));
+
+            if (!hasFullAccess) {
+              // Free / Non-Entitled User
+              const isEditionLocked = isPremiumEdition || isOwnerMismatch;
               setEdition({
                 ...parsed.edition,
-                isLocked: isPremiumEdition || needsSanitization,
+                isLocked: isEditionLocked,
               });
               setDevotions(
                 parsed.devotions.map((d: Devotion) => {
-                  const shouldLock = d.day > 3 || isPremiumEdition || needsSanitization;
+                  const shouldLock = d.day > 3 || isEditionLocked;
                   return shouldLock
                     ? {
                         ...d,
@@ -92,12 +95,24 @@ export function ContentProvider({ children }: PropsWithChildren) {
                         furtherStudies: [],
                         isLocked: true,
                       }
-                    : d;
+                    : {
+                        ...d,
+                        isLocked: false,
+                      };
                 })
               );
             } else {
-              setEdition(parsed.edition);
-              setDevotions(parsed.devotions);
+              // Active Verified Subscriber (Has Full Access)
+              setEdition({
+                ...parsed.edition,
+                isLocked: false,
+              });
+              setDevotions(
+                parsed.devotions.map((d: Devotion) => ({
+                  ...d,
+                  isLocked: false,
+                }))
+              );
             }
             setSource('offline');
             setLoading(false);
