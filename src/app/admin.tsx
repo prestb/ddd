@@ -109,7 +109,7 @@ export default function AdminScreen() {
 
   // Financials State
   const [financials, setFinancials] = useState<any>(null);
-  const [financeFilter, setFinanceFilter] = useState<'all' | 'deposits' | 'donations'>('all');
+  const [financeFilter, setFinanceFilter] = useState<'all' | 'deposits' | 'donations' | 'subscriptions'>('all');
   const [selectedTxDetails, setSelectedTxDetails] = useState<any | null>(null);
 
   const [form, setForm] = useState({
@@ -266,7 +266,7 @@ export default function AdminScreen() {
   }, [loadDashboard]);
 
   useEffect(() => {
-    const visible = showComposer || showEditionComposer || showJsonModal || showCreateUserModal || Boolean(editingUser) || Boolean(selectedTxDetails);
+    const visible = showComposer || showEditionComposer || showJsonModal || showCreateUserModal || Boolean(editingUser) || Boolean(selectedTxDetails) || Boolean(reviewingImport) || Boolean(reviewingDay);
     Animated.spring(modalProgress, {
       toValue: visible ? 1 : 0,
       useNativeDriver: true,
@@ -274,7 +274,7 @@ export default function AdminScreen() {
       stiffness: 180,
       mass: 0.8,
     }).start();
-  }, [modalProgress, showComposer, showEditionComposer, showJsonModal, showCreateUserModal, editingUser, selectedTxDetails]);
+  }, [modalProgress, showComposer, showEditionComposer, showJsonModal, showCreateUserModal, editingUser, selectedTxDetails, reviewingImport, reviewingDay]);
 
   const refresh = async () => {
     setRefreshing(true);
@@ -409,115 +409,6 @@ export default function AdminScreen() {
     await loadDashboard();
   };
 
-  const saveMeditation = async () => {
-    if (!supabase || !selectedEditionId) return;
-    const editingId = editingDevotionId;
-    const dayNumber = Number(form.day);
-    if (!dayNumber || dayNumber < 1 || dayNumber > 31 || !form.title.trim() || !form.meditation.trim() || !form.scriptureReference.trim()) {
-      Alert.alert('Missing information', 'Add a valid day number, title, Scripture reference, and meditation text.');
-      return;
-    }
-    setSaving(true);
-    const duplicateQuery = supabase.from('devotions').select('id').eq('edition_id', selectedEditionId).eq('day_number', dayNumber);
-    const { data: duplicateRows, error: duplicateError } = editingId ? await duplicateQuery.neq('id', editingId) : await duplicateQuery;
-    if (duplicateError) {
-      setSaving(false);
-      Alert.alert('Could not validate day', duplicateError.message);
-      return;
-    }
-    if (duplicateRows?.length) {
-      setSaving(false);
-      Alert.alert('Day already exists', `Day ${dayNumber} is already in this edition. Choose a different day number.`);
-      return;
-    }
-    const payload = {
-      edition_id: selectedEditionId,
-      day_number: dayNumber,
-      weekday: form.weekday.trim() || 'Daily',
-      title: form.title.trim(),
-      scripture_reference: form.scriptureReference.trim(),
-      scripture_text: form.scriptureText.trim() || null,
-      meditation: form.meditation.trim(),
-      further_studies: form.furtherStudies.split(',').map((item) => item.trim()).filter(Boolean),
-      wisdom_nugget: form.wisdom.trim() || null,
-      declaration: form.declaration.trim() || null,
-    };
-    const result = editingId
-      ? await supabase.from('devotions').update(payload).eq('id', editingId).select('id').maybeSingle()
-      : await supabase.from('devotions').insert(payload);
-    setSaving(false);
-    if (result.error) {
-      Alert.alert('Could not save meditation', result.error.message);
-      return;
-    }
-    setForm({ day: '', weekday: '', title: '', scriptureReference: '', scriptureText: '', meditation: '', furtherStudies: '', wisdom: '', declaration: '' });
-    setEditingDevotionId(null);
-    setShowComposer(false);
-    await loadDashboard();
-    await loadDevotions(selectedEditionId);
-    Alert.alert('Saved', `Day ${dayNumber} was ${editingId ? 'updated' : 'added'} successfully.`);
-  };
-
-  const importBulkJson = async () => {
-    if (!supabase || !selectedEditionId || !jsonInput.trim()) return;
-    try {
-      const parsed = JSON.parse(jsonInput.trim());
-      const rows = Array.isArray(parsed) ? parsed : [parsed];
-      const { valid, invalidDays } = validateDevotions(rows);
-      if (invalidDays.length > 0) {
-        Alert.alert('Validation Error', `Invalid records found for day(s): ${invalidDays.join(', ')}.`);
-        return;
-      }
-      setSaving(true);
-      const payload = valid.map((item) => ({
-        edition_id: selectedEditionId,
-        day_number: item.day,
-        weekday: item.weekday || 'Daily',
-        title: item.title,
-        scripture_reference: item.scripture,
-        scripture_text: (item as any).scriptureText || null,
-        meditation: item.meditation,
-        further_studies: item.furtherStudies ?? [],
-        wisdom_nugget: item.wisdom || null,
-        declaration: item.declaration || null,
-      }));
-
-      const { error } = await supabase.from('devotions').upsert(payload, { onConflict: 'edition_id,day_number' });
-      setSaving(false);
-      if (error) {
-        Alert.alert('Could not import JSON', error.message);
-        return;
-      }
-      setShowJsonModal(false);
-      setJsonInput('');
-      await loadDashboard();
-      await loadDevotions(selectedEditionId);
-      Alert.alert('Bulk Import Success', `${valid.length} devotions imported/updated successfully.`);
-    } catch {
-      Alert.alert('Invalid JSON', 'Please enter a valid JSON array of devotional objects.');
-    }
-  };
-
-  const deleteDevotion = (item: Devotion) =>
-    Alert.alert('Delete meditation?', item.title, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          if (!supabase) return;
-          const { error } = await supabase.from('devotions').delete().eq('id', item.id);
-          if (error) {
-            Alert.alert('Could not delete meditation', error.message);
-            return;
-          }
-          if (selectedEditionId) await loadDevotions(selectedEditionId);
-          await loadDashboard();
-          Alert.alert('Deleted', 'The meditation was removed from this edition.');
-        },
-      },
-    ]);
-
   const deleteEdition = (edition: Edition) =>
     Alert.alert('Delete month?', `This deletes ${edition.title} and all its meditations.`, [
       { text: 'Cancel', style: 'cancel' },
@@ -540,6 +431,263 @@ export default function AdminScreen() {
         },
       },
     ]);
+
+  const importPdf = async () => {
+    if (!supabase || !session) return;
+    let documentPicker: typeof import('expo-document-picker');
+    try {
+      documentPicker = await import('expo-document-picker');
+    } catch {
+      Alert.alert('PDF import needs an app update', 'Install the next development build to add the PDF picker to this device.');
+      return;
+    }
+    const result = await documentPicker.getDocumentAsync({ type: 'application/pdf', copyToCacheDirectory: true, multiple: false });
+    if (result.canceled || !result.assets[0]) return;
+    const asset = result.assets[0];
+    setUploadingPdf(true);
+    try {
+      const response = await fetch(asset.uri);
+      const file = await response.blob();
+      const safeName = asset.name.replace(/[^a-zA-Z0-9._-]/g, '-');
+      const path = `${session.user.id}/${Date.now()}-${safeName}`;
+      const { error } = await supabase.storage.from('devotional-imports').upload(path, file, { contentType: 'application/pdf', upsert: false });
+      if (error) {
+        Alert.alert('Could not upload PDF', error.message);
+        return;
+      }
+      const { error: jobError } = await supabase.from('devotional_imports').insert({ owner_id: session.user.id, storage_path: path, source_name: asset.name, status: 'uploaded' });
+      if (jobError) {
+        await supabase.storage.from('devotional-imports').remove([path]);
+        Alert.alert('Could not create import review', jobError.message);
+        return;
+      }
+      await loadDashboard();
+      Alert.alert('PDF uploaded for review', 'The file is stored privately. Run the importer review step before creating or publishing an edition.');
+    } catch (errorValue: unknown) {
+      Alert.alert('Could not upload PDF', errorValue instanceof Error ? errorValue.message : 'The selected file could not be read.');
+    } finally {
+      setUploadingPdf(false);
+    }
+  };
+
+  const extractPdf = async (importId: string) => {
+    if (!supabase) return;
+    setUploadingPdf(true);
+    const { data, error } = await supabase.functions.invoke('parse-devotional-pdf', { body: { importId } });
+    setUploadingPdf(false);
+    if (error) {
+      let detail = error.message;
+      try {
+        const response = (error as { context?: Response }).context;
+        const body = response ? ((await response.clone().json()) as { error?: string }) : null;
+        if (body?.error) detail = body.error;
+      } catch {
+        // Keep message
+      }
+      await loadDashboard();
+      Alert.alert('Could not extract PDF', detail);
+    } else {
+      await loadDashboard();
+      Alert.alert('PDF ready for review', `${data?.daysFound ?? 0} daily records extracted. Review is required before importing.`);
+    }
+  };
+
+  const retryPdf = async (importId: string) => {
+    if (!supabase) return;
+    const { error } = await supabase.from('devotional_imports').update({ status: 'uploaded', error_message: null, updated_at: new Date().toISOString() }).eq('id', importId);
+    if (error) {
+      Alert.alert('Could not retry import', error.message);
+      return;
+    }
+    await extractPdf(importId);
+  };
+
+  const deletePdf = async () => {
+    if (!supabase || !deletingPdf) return;
+    const file = deletingPdf;
+    setDeletingPdf(null);
+    const { error } = await supabase.functions.invoke('delete-devotional-pdf', { body: { importId: file.id } });
+    if (error) {
+      Alert.alert('Could not delete PDF', error.message);
+      return;
+    }
+    await loadDashboard();
+  };
+
+  const openImportReview = async (file: PdfImport) => {
+    if (!supabase) return;
+    const { data, error } = await supabase.from('devotional_imports').select('id, source_name, storage_path, status, error_message, created_at, extracted_data').eq('id', file.id).single();
+    if (error || !data) {
+      Alert.alert('Could not open review', error?.message ?? 'The import record could not be found.');
+      return;
+    }
+    const rawDays = data.extracted_data?.days ?? [];
+    const repairedDays = rawDays.map((d: any) => sanitizeAndRepairExtractedDay(d) as ImportedDay);
+    const repairedData = {
+      ...data.extracted_data,
+      days: repairedDays,
+      review_count: repairedDays.filter((d: ImportedDay) => d.needs_review).length,
+    };
+    setReviewingImport({ ...data, extracted_data: repairedData } as PdfImport);
+  };
+
+  const openDayReview = (day: ImportedDay) => {
+    const repaired = sanitizeAndRepairExtractedDay(day) as ImportedDay;
+    setReviewingDay(repaired);
+    setReviewDayForm({
+      title: repaired.title ?? '',
+      scriptureReference: repaired.scripture_reference ?? '',
+      scriptureText: repaired.scripture_text ?? '',
+      meditation: repaired.meditation ?? '',
+      wisdom: repaired.wisdom_nugget ?? '',
+      declaration: repaired.declaration ?? '',
+      furtherStudies: (repaired.further_studies ?? []).join(', '),
+    });
+  };
+
+  const saveDayReview = async () => {
+    if (!supabase || !reviewingImport || !reviewingDay) return;
+    const days = reviewingImport.extracted_data?.days ?? [];
+    const nextDay: ImportedDay = {
+      ...reviewingDay,
+      title: reviewDayForm.title.trim(),
+      scripture_reference: reviewDayForm.scriptureReference.trim(),
+      scripture_text: reviewDayForm.scriptureText.trim(),
+      meditation: reviewDayForm.meditation.trim(),
+      wisdom_nugget: reviewDayForm.wisdom.trim(),
+      declaration: reviewDayForm.declaration.trim(),
+      further_studies: reviewDayForm.furtherStudies.split(',').map((i) => i.trim()).filter(Boolean),
+      needs_review: !reviewDayForm.title.trim() || !reviewDayForm.scriptureReference.trim() || !reviewDayForm.meditation.trim() || !reviewDayForm.declaration.trim(),
+    };
+    const nextDays = days.map((day) => (day.day_number === reviewingDay.day_number ? nextDay : day));
+    const nextData = { ...(reviewingImport.extracted_data ?? {}), days: nextDays, review_count: nextDays.filter((day) => day.needs_review).length };
+    setSaving(true);
+    const { error } = await supabase.from('devotional_imports').update({ extracted_data: nextData, updated_at: new Date().toISOString() }).eq('id', reviewingImport.id);
+    setSaving(false);
+    if (error) {
+      Alert.alert('Could not save review', error.message);
+      return;
+    }
+    setReviewingImport({ ...reviewingImport, extracted_data: nextData });
+    setReviewingDay(null);
+    await loadDashboard();
+  };
+
+  const approveImport = async (targetEditionId: string) => {
+    if (!supabase || !reviewingImport) return;
+    const days = reviewingImport.extracted_data?.days ?? [];
+    if (!days.length) {
+      Alert.alert('Nothing to import', 'This PDF did not produce any daily records.');
+      return;
+    }
+    const invalid = days.filter((day) => day.needs_review || !day.title?.trim() || !day.scripture_reference?.trim() || !day.meditation?.trim());
+    if (invalid.length) {
+      Alert.alert('Review required', `${invalid.length} extracted day${invalid.length === 1 ? '' : 's'} still need editorial review before import.`);
+      return;
+    }
+    setSaving(true);
+    const { error } = await supabase.from('devotions').upsert(
+      days.map((day) => ({
+        edition_id: targetEditionId,
+        day_number: day.day_number,
+        weekday: day.weekday || 'Daily',
+        title: day.title,
+        scripture_reference: day.scripture_reference,
+        scripture_text: day.scripture_text || null,
+        meditation: day.meditation,
+        further_studies: day.further_studies ?? [],
+        wisdom_nugget: day.wisdom_nugget || null,
+        declaration: day.declaration || null,
+      })),
+      { onConflict: 'edition_id,day_number' },
+    );
+    if (!error) await supabase.from('devotional_imports').update({ status: 'imported', updated_at: new Date().toISOString() }).eq('id', reviewingImport.id);
+    setSaving(false);
+    if (error) {
+      Alert.alert('Could not import meditations', error.message);
+      return;
+    }
+    setReviewingImport(null);
+    await loadDashboard();
+    Alert.alert('Import complete', `${days.length} meditations were added to the draft edition.`);
+  };
+
+  const editNewsletter = (campaign: { id: string; subject: string; body?: string | null }) => {
+    setEditingCampaignId(campaign.id);
+    setNewsletter({
+      subject: campaign.subject,
+      body: campaign.body ?? '',
+    });
+  };
+
+  const deleteNewsletter = (campaign: { id: string; subject: string }) => {
+    Alert.alert('Delete newsletter draft?', campaign.subject, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          if (!supabase) return;
+          const { error } = await supabase.from('newsletter_campaigns').delete().eq('id', campaign.id);
+          if (error) {
+            Alert.alert('Could not delete draft', error.message);
+            return;
+          }
+          if (editingCampaignId === campaign.id) {
+            setEditingCampaignId(null);
+            setNewsletter({ subject: '', body: '' });
+          }
+          await loadDashboard();
+          Alert.alert('Deleted', 'Newsletter draft deleted.');
+        },
+      },
+    ]);
+  };
+
+  const saveNewsletter = async () => {
+    if (!supabase || !newsletter.subject.trim() || !newsletter.body.trim()) {
+      Alert.alert('Missing information', 'Add a subject and message.');
+      return;
+    }
+    setSaving(true);
+    const payload = {
+      subject: newsletter.subject.trim(),
+      body: newsletter.body.trim(),
+    };
+
+    const { error } = editingCampaignId
+      ? await supabase.from('newsletter_campaigns').update(payload).eq('id', editingCampaignId)
+      : await supabase.from('newsletter_campaigns').insert({ ...payload, created_by: session?.user.id, status: 'draft' });
+
+    setSaving(false);
+    if (error) {
+      Alert.alert('Could not save newsletter', error.message);
+    } else {
+      setNewsletter({ subject: '', body: '' });
+      setEditingCampaignId(null);
+      await loadDashboard();
+      Alert.alert('Saved', editingCampaignId ? 'Newsletter updated.' : 'Newsletter draft saved.');
+    }
+  };
+
+  const sendNewsletter = async (campaignId: string) => {
+    if (!supabase) return;
+    const client = supabase;
+    Alert.alert('Send newsletter?', 'This will send the campaign to opted-in subscribers.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Send now',
+        onPress: async () => {
+          const { error } = await client.functions.invoke('send-newsletter', { body: { campaignId } });
+          if (error) Alert.alert('Could not send newsletter', error.message);
+          else {
+            Alert.alert('Newsletter sent', 'Delivery has been started.');
+            await loadDashboard();
+          }
+        },
+      },
+    ]);
+  };
 
   if (!session) {
     return (
@@ -587,16 +735,55 @@ export default function AdminScreen() {
                 </View>
               </View>
 
-              {/* TAB 1: CONTENT MANAGEMENT */}
+              {/* TAB 1: CONTENT MANAGEMENT & PDF IMPORTS */}
               {adminTab === 'content' ? (
                 <>
                   <View style={styles.composerHeader}>
                     <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>Published Editions</Text>
-                    <Pressable onPress={() => { setEditingEditionId(null); setEditionForm({ slug: '', title: '', theme: '', introduction: '', month: '', year: '', language: 'en' }); setShowEditionComposer(true); }} style={styles.actionBtnPill}>
-                      <AppIcon name="plus" size={14} tintColor={DewDesign.colors.forest} />
-                      <Text style={styles.actionBtnLabel}>New Month</Text>
-                    </Pressable>
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      <Pressable disabled={uploadingPdf} onPress={importPdf} style={styles.actionBtnPill}>
+                        <AppIcon name="arrow.up.doc" size={14} tintColor={DewDesign.colors.forest} />
+                        <Text style={styles.actionBtnLabel}>{uploadingPdf ? 'Uploading...' : 'Import PDF'}</Text>
+                      </Pressable>
+                      <Pressable onPress={() => { setEditingEditionId(null); setEditionForm({ slug: '', title: '', theme: '', introduction: '', month: '', year: '', language: 'en' }); setShowEditionComposer(true); }} style={styles.actionBtnPill}>
+                        <AppIcon name="plus" size={14} tintColor={DewDesign.colors.forest} />
+                        <Text style={styles.actionBtnLabel}>New Month</Text>
+                      </Pressable>
+                    </View>
                   </View>
+
+                  {/* PDF Import Queue */}
+                  {pdfImports.length > 0 && (
+                    <View style={[adminExtraStyles.adminPanel, isDark && styles.darkCard, { marginBottom: 20 }]}>
+                      <Text style={[styles.sectionTitle, isDark && styles.darkInk, { fontSize: 16 }]}>PDF Import Queue</Text>
+                      {pdfImports.map((item) => (
+                        <View key={item.id} style={[styles.editionCard, isDark && styles.darkCard, { marginBottom: 8 }]}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={[styles.editionTitle, isDark && styles.darkInk]} numberOfLines={1}>{item.source_name}</Text>
+                              <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>{`Status: ${item.status.toUpperCase()} · ${item.extracted_data?.days_found ?? 0} days found`}</Text>
+                            </View>
+                            <View style={{ flexDirection: 'row', gap: 6 }}>
+                              {item.status === 'review' || item.status === 'extracted' ? (
+                                <Pressable onPress={() => openImportReview(item)} style={styles.actionBtnPill}>
+                                  <AppIcon name="eye" size={12} tintColor={DewDesign.colors.forest} />
+                                  <Text style={styles.actionBtnLabel}>Review</Text>
+                                </Pressable>
+                              ) : item.status === 'uploaded' ? (
+                                <Pressable onPress={() => extractPdf(item.id)} style={styles.actionBtnPill}>
+                                  <AppIcon name="play.fill" size={12} tintColor={DewDesign.colors.forest} />
+                                  <Text style={styles.actionBtnLabel}>Extract</Text>
+                                </Pressable>
+                              ) : null}
+                              <Pressable onPress={() => setDeletingPdf(item)} style={styles.actionBtnPill}>
+                                <AppIcon name="trash" size={12} tintColor={DewDesign.colors.terracotta} />
+                              </Pressable>
+                            </View>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  )}
 
                   {editions.map((editionItem) => (
                     <View key={editionItem.id} style={[styles.editionCard, isDark && styles.darkCard]}>
@@ -635,8 +822,66 @@ export default function AdminScreen() {
                     </View>
                   ))}
                 </>
+              ) : adminTab === 'newsletters' ? (
+                /* TAB 2: NEWSLETTER STUDIO */
+                <View style={[adminExtraStyles.adminPanel, isDark && styles.darkCard]}>
+                  <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>Newsletter Studio</Text>
+                  <Text style={[adminExtraStyles.panelIntro, isDark && styles.darkMuted]}>
+                    {`${subscriberCount} opted-in subscribers ready to receive devotional campaigns.`}
+                  </Text>
+
+                  {/* Newsletter Composer */}
+                  <TextInput
+                    value={newsletter.subject}
+                    onChangeText={(v) => setNewsletter((c) => ({ ...c, subject: v }))}
+                    placeholder="Campaign Subject"
+                    placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                    style={[styles.formInput, isDark && styles.darkFormInput]}
+                  />
+                  <TextInput
+                    value={newsletter.body}
+                    onChangeText={(v) => setNewsletter((c) => ({ ...c, body: v }))}
+                    placeholder="Newsletter content / devotional reflection..."
+                    placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                    multiline
+                    style={[styles.formInput, styles.formTextAreaLarge, isDark && styles.darkFormInput]}
+                  />
+
+                  <Pressable disabled={saving} onPress={saveNewsletter} style={[styles.saveButton, saving && styles.disabledButton, { marginBottom: 20 }]}>
+                    <Text style={styles.publishButtonText}>{saving ? 'Saving...' : editingCampaignId ? 'Update Draft' : 'Save Draft'}</Text>
+                  </Pressable>
+
+                  {/* Campaign History */}
+                  <Text style={[adminExtraStyles.panelHeading, isDark && styles.darkInk]}>Campaign History</Text>
+                  {campaigns.map((campaign) => (
+                    <View key={campaign.id} style={[styles.editionCard, isDark && styles.darkCard]}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.editionTitle, isDark && styles.darkInk]} numberOfLines={1}>{campaign.subject}</Text>
+                          <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>{`Status: ${campaign.status.toUpperCase()} · ${new Date(campaign.created_at).toLocaleDateString()}`}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', gap: 6 }}>
+                          <Pressable onPress={() => editNewsletter(campaign)} style={styles.actionBtnPill}>
+                            <AppIcon name="pencil" size={12} tintColor={DewDesign.colors.forest} />
+                          </Pressable>
+                          <Pressable onPress={() => deleteNewsletter(campaign)} style={styles.actionBtnPill}>
+                            <AppIcon name="trash" size={12} tintColor={DewDesign.colors.terracotta} />
+                          </Pressable>
+                          {campaign.status === 'draft' ? (
+                            <Pressable onPress={() => sendNewsletter(campaign.id)} style={[styles.actionBtnPill, { backgroundColor: DewDesign.colors.forest }]}>
+                              <AppIcon name="paperplane.fill" size={12} tintColor="#FFFFFF" />
+                            </Pressable>
+                          ) : null}
+                        </View>
+                      </View>
+                    </View>
+                  ))}
+                  {!campaigns.length && (
+                    <Text style={[styles.emptyText, isDark && styles.darkMuted]}>No newsletter drafts yet.</Text>
+                  )}
+                </View>
               ) : adminTab === 'users' ? (
-                /* TAB 2: USER MANAGEMENT (ADMIN ONLY) */
+                /* TAB 3: USER MANAGEMENT (ADMIN ONLY) */
                 <View style={[adminExtraStyles.adminPanel, isDark && styles.darkCard]}>
                   <View style={styles.composerHeader}>
                     <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>User Accounts & Roles</Text>
@@ -651,12 +896,12 @@ export default function AdminScreen() {
                   {usersList.map((userItem) => (
                     <View key={userItem.id} style={[styles.editionCard, isDark && styles.darkCard, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
                       <View>
-                        <Text style={[styles.editionTitle, isDark && styles.darkInk]}>{userItem.id.slice(0, 18)}...</Text>
+                        <Text style={[styles.editionTitle, isDark && styles.darkInk]}>{userItem.email ?? `${userItem.id.slice(0, 18)}...`}</Text>
                         <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>{`Role: ${userItem.role.toUpperCase()}`}</Text>
                       </View>
                       {role === 'admin' ? (
                         <Pressable
-                          onPress={() => setEditingUser({ id: userItem.id, role: userItem.role })}
+                          onPress={() => setEditingUser({ id: userItem.id, role: userItem.role, email: userItem.email })}
                           style={styles.actionBtnPill}>
                           <AppIcon name="pencil" size={12} tintColor={DewDesign.colors.forest} />
                           <Text style={styles.actionBtnLabel}>Role</Text>
@@ -666,7 +911,7 @@ export default function AdminScreen() {
                   ))}
                 </View>
               ) : adminTab === 'finance' ? (
-                /* TAB 3: FINANCIAL LEDGER (ADMIN ONLY) */
+                /* TAB 4: FINANCIAL LEDGER (ADMIN ONLY) */
                 <View style={[adminExtraStyles.adminPanel, isDark && styles.darkCard]}>
                   <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>Financial Ledgers & Revenue</Text>
 
@@ -816,6 +1061,121 @@ export default function AdminScreen() {
               </ScrollView>
             </View>
           </KeyboardAvoidingView>
+        </Modal>
+
+        {/* PDF Import Review Modal */}
+        <Modal visible={Boolean(reviewingImport)} transparent animationType="slide" onRequestClose={() => setReviewingImport(null)}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={adminExtraStyles.modalBackdrop}>
+            <View style={[adminExtraStyles.modalPanel, isDark && styles.darkCard]}>
+              <ScrollView style={adminExtraStyles.modalScroll} contentContainerStyle={adminExtraStyles.modalContent}>
+                <View style={styles.composerHeader}>
+                  <Text style={[styles.sectionTitle, isDark && styles.darkInk]} numberOfLines={1}>{`Review PDF: ${reviewingImport?.source_name}`}</Text>
+                  <Pressable onPress={() => setReviewingImport(null)}>
+                    <AppIcon name="xmark" size={18} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />
+                  </Pressable>
+                </View>
+
+                <Text style={[styles.fieldLabel, isDark && styles.darkMuted]}>{`${reviewingImport?.extracted_data?.days?.length ?? 0} days extracted`}</Text>
+                {(reviewingImport?.extracted_data?.days ?? []).map((day) => (
+                  <View key={day.day_number} style={[styles.editionCard, isDark && styles.darkCard, { marginBottom: 8 }]}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.editionTitle, isDark && styles.darkInk]}>{`Day ${day.day_number}: ${day.title}`}</Text>
+                        <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>{day.scripture_reference}</Text>
+                      </View>
+                      <Pressable onPress={() => openDayReview(day)} style={styles.actionBtnPill}>
+                        <AppIcon name="pencil" size={12} tintColor={DewDesign.colors.forest} />
+                        <Text style={styles.actionBtnLabel}>Review Day</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ))}
+
+                {selectedEditionId ? (
+                  <Pressable disabled={saving} onPress={() => approveImport(selectedEditionId)} style={[styles.saveButton, { marginTop: 12 }, saving && styles.disabledButton]}>
+                    <Text style={styles.publishButtonText}>{saving ? 'Importing...' : 'Approve & Import to Edition'}</Text>
+                  </Pressable>
+                ) : (
+                  <Text style={[styles.fieldLabel, { color: DewDesign.colors.terracotta, marginTop: 12 }]}>Select an edition on the Content tab to import into.</Text>
+                )}
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+
+        {/* Single Day Review Modal */}
+        <Modal visible={Boolean(reviewingDay)} transparent animationType="slide" onRequestClose={() => setReviewingDay(null)}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={adminExtraStyles.modalBackdrop}>
+            <View style={[adminExtraStyles.modalPanel, isDark && styles.darkCard]}>
+              <ScrollView style={adminExtraStyles.modalScroll} contentContainerStyle={adminExtraStyles.modalContent}>
+                <View style={styles.composerHeader}>
+                  <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{`Edit Day ${reviewingDay?.day_number}`}</Text>
+                  <Pressable onPress={() => setReviewingDay(null)}>
+                    <AppIcon name="xmark" size={18} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />
+                  </Pressable>
+                </View>
+
+                <TextInput
+                  value={reviewDayForm.title}
+                  onChangeText={(v) => setReviewDayForm((c) => ({ ...c, title: v }))}
+                  placeholder="Day Title"
+                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                  style={[styles.formInput, isDark && styles.darkFormInput]}
+                />
+                <TextInput
+                  value={reviewDayForm.scriptureReference}
+                  onChangeText={(v) => setReviewDayForm((c) => ({ ...c, scriptureReference: v }))}
+                  placeholder="Scripture Reference"
+                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                  style={[styles.formInput, isDark && styles.darkFormInput]}
+                />
+                <TextInput
+                  value={reviewDayForm.meditation}
+                  onChangeText={(v) => setReviewDayForm((c) => ({ ...c, meditation: v }))}
+                  placeholder="Meditation Text"
+                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                  multiline
+                  style={[styles.formInput, styles.formTextArea, isDark && styles.darkFormInput]}
+                />
+                <TextInput
+                  value={reviewDayForm.wisdom}
+                  onChangeText={(v) => setReviewDayForm((c) => ({ ...c, wisdom: v }))}
+                  placeholder="Wisdom Nugget"
+                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                  style={[styles.formInput, isDark && styles.darkFormInput]}
+                />
+                <TextInput
+                  value={reviewDayForm.declaration}
+                  onChangeText={(v) => setReviewDayForm((c) => ({ ...c, declaration: v }))}
+                  placeholder="Declaration"
+                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                  style={[styles.formInput, isDark && styles.darkFormInput]}
+                />
+
+                <Pressable disabled={saving} onPress={saveDayReview} style={[styles.saveButton, saving && styles.disabledButton]}>
+                  <Text style={styles.publishButtonText}>{saving ? 'Saving...' : 'Save Day Review'}</Text>
+                </Pressable>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+
+        {/* Delete PDF Confirmation Modal */}
+        <Modal visible={Boolean(deletingPdf)} transparent animationType="fade" onRequestClose={() => setDeletingPdf(null)}>
+          <View style={adminExtraStyles.modalBackdrop}>
+            <View style={[adminExtraStyles.modalPanel, isDark && styles.darkCard, { padding: 22 }]}>
+              <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>Delete PDF Import?</Text>
+              <Text style={[styles.emptyText, isDark && styles.darkMuted, { marginBottom: 18 }]}>{`Are you sure you want to delete "${deletingPdf?.source_name}"?`}</Text>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <Pressable onPress={() => setDeletingPdf(null)} style={[styles.actionBtnPill, { flex: 1, justifyContent: 'center' }]}>
+                  <Text style={styles.actionBtnLabel}>Cancel</Text>
+                </Pressable>
+                <Pressable onPress={deletePdf} style={[styles.actionBtnPill, { flex: 1, justifyContent: 'center', backgroundColor: DewDesign.colors.terracotta }]}>
+                  <Text style={[styles.actionBtnLabel, { color: '#FFFFFF' }]}>Delete</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
         </Modal>
 
         {/* Edition Composer Modal */}
