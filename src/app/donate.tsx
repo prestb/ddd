@@ -5,7 +5,7 @@ import { DewDesign } from '@/constants/design';
 import { useSettings } from '@/context/settings-context';
 import { t } from '@/lib/i18n';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
@@ -73,10 +73,9 @@ export default function DonateScreen() {
     }
   };
 
-  const handleVerifyDonationStatus = async () => {
+  const handleVerifyDonationStatus = useCallback(async () => {
     if (!transId || !supabase) return;
     setIsLoading(true);
-    setErrorMessage(null);
 
     try {
       const { data, error } = await supabase.functions.invoke('check-donation-status', {
@@ -93,8 +92,10 @@ export default function DonateScreen() {
       }
 
       if (data.status === 'successful') {
+        setErrorMessage(null);
         setStep('success');
       } else if (data.status === 'failed') {
+        setErrorMessage(null);
         setStep('failed');
       } else {
         setErrorMessage(
@@ -112,10 +113,36 @@ export default function DonateScreen() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [language, transId, verificationToken]);
+
+  // Automatic Controlled Status Polling when step === 'pending'
+  useEffect(() => {
+    if (step !== 'pending' || !transId) return;
+
+    let active = true;
+    let pollCount = 0;
+    const maxPolls = 20; // Poll every 3 seconds for 60 seconds
+
+    handleVerifyDonationStatus();
+
+    const interval = setInterval(async () => {
+      pollCount++;
+      if (pollCount >= maxPolls || !active) {
+        clearInterval(interval);
+        return;
+      }
+      await handleVerifyDonationStatus();
+    }, 3000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [step, transId, handleVerifyDonationStatus]);
 
   const resetForm = () => {
     setTransId(null);
+    setVerificationToken(null);
     setStep('form');
     setErrorMessage(null);
   };
@@ -186,7 +213,7 @@ export default function DonateScreen() {
             </View>
           )}
 
-          {/* STEP 2: PENDING USSD PROMPT */}
+          {/* STEP 2: PENDING USSD PROMPT (AUTOMATIC STATUS MONITORING) */}
           {step === 'pending' && (
             <View style={[styles.card, isDark && styles.darkCard, { alignItems: 'center', padding: 22 }]}>
               <AppIcon name="clock.fill" size={44} tintColor={DewDesign.colors.terracotta} />

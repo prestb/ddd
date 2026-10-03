@@ -3,7 +3,7 @@ import AppBottomNav from '@/components/app-bottom-nav';
 import DailyDewHeader from '@/components/daily-dew-header';
 import { DewDesign } from '@/constants/design';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/auth-context';
@@ -159,10 +159,9 @@ export default function AddFundsScreen() {
     }
   };
 
-  const handleVerifyBackendStatus = async () => {
+  const handleVerifyBackendStatus = useCallback(async () => {
     if (!transId) return;
     setBusy(true);
-    setErrorMessage(null);
 
     try {
       const result = await walletFundingService.verifyDepositStatus(transId);
@@ -172,8 +171,10 @@ export default function AddFundsScreen() {
           ? await walletFundingService.getUserBalance(session.user.id)
           : null;
         setUpdatedBalance(freshBalance ?? (result.amount || amount));
+        setErrorMessage(null);
         setStep('success');
       } else if (result.status === 'failed' || result.status === 'cancelled') {
+        setErrorMessage(null);
         setStep('failed');
       } else if (result.status === 'verification_error') {
         setErrorMessage(
@@ -198,7 +199,32 @@ export default function AddFundsScreen() {
     } finally {
       setBusy(false);
     }
-  };
+  }, [amount, language, session, transId]);
+
+  // Automatic Controlled Status Polling when step === 'pending'
+  useEffect(() => {
+    if (step !== 'pending' || !transId) return;
+
+    let active = true;
+    let pollCount = 0;
+    const maxPolls = 20; // Poll every 3 seconds for 60 seconds
+
+    handleVerifyBackendStatus();
+
+    const interval = setInterval(async () => {
+      pollCount++;
+      if (pollCount >= maxPolls || !active) {
+        clearInterval(interval);
+        return;
+      }
+      await handleVerifyBackendStatus();
+    }, 3000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [step, transId, handleVerifyBackendStatus]);
 
   return (
     <View style={[styles.screen, isDark && styles.darkScreen]}>
@@ -368,7 +394,7 @@ export default function AddFundsScreen() {
             </View>
           )}
 
-          {/* STEP 3: PAYMENT PENDING USSD PROMPT */}
+          {/* STEP 3: PAYMENT PENDING USSD PROMPT (AUTOMATIC STATUS MONITORING) */}
           {step === 'pending' && (
             <View style={[styles.pendingCard, isDark && styles.darkCard]}>
               <View style={styles.pendingIconCircle}>
