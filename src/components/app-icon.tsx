@@ -66,6 +66,8 @@ const iconMap: Record<string, string> = {
   eye: 'eye-outline',
   'arrow.down.doc': 'file-download-outline',
   moon: 'moon-waning-crescent',
+  'eye.slash': 'eye-off-outline',
+  'checkmark.seal.fill': 'check-decagram',
 };
 
 type AppIconProps = {
