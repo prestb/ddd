@@ -27,6 +27,7 @@ export default function LegalScreen() {
           <Text style={[styles.title, isDark && styles.darkInk]}>{t(language, 'aboutSupport')}</Text>
           <Text style={[styles.subtitle, isDark && styles.darkBody]}>A quiet place for Scripture, meditation, prayer, and reflection.</Text>
 
+          {/* 1. ABOUT THE APP */}
           <View style={[styles.card, isDark && styles.darkCard]}>
             <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{t(language, 'aboutApp')}</Text>
             <Text style={[styles.body, isDark && styles.darkBody]}>
@@ -34,27 +35,22 @@ export default function LegalScreen() {
             </Text>
           </View>
 
-          <View style={[styles.card, isDark && styles.darkCard]}>
-            <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{t(language, 'privacy')}</Text>
-            <Text style={[styles.body, isDark && styles.darkBody]}>
-              Your reflections, prayers, bookmarks, and progress are stored on your device. When you sign in, this personal data can sync to your account so you can continue across devices. We do not sell personal devotional data.
+          {/* 2. PRAYER OF SALVATION */}
+          <View style={[styles.card, styles.prayerCard, isDark && styles.darkPrayerCard]}>
+            <View style={styles.prayerHeadingRow}>
+              <AppIcon name="hands.sparkles.fill" size={18} tintColor={DewDesign.colors.forest} />
+              <Text style={[styles.sectionTitle, styles.prayerTitle, isDark && styles.darkInk]}>
+                {language === 'fr' ? 'PRIÈRE DE SALUT' : 'PRAYER OF SALVATION'}
+              </Text>
+            </View>
+            <Text style={[styles.body, styles.prayerBody, isDark && styles.darkBody]}>
+              {language === 'fr'
+                ? 'Dieu de Miséricorde et de Vérité, je reconnais que je suis un pécheur et je viens à toi au Nom de Jésus-Christ, ton Fils bien-aimé. Ta Parole déclare : « Car quiconque invoquera le nom du Seigneur sera sauvé » (Romains 10:13). Je crois dans mon cœur que Jésus-Christ a été baptisé, est mort et est ressuscité pour ma rédemption et ma justification. Je demande à Jésus de venir dans ma vie et d’être le Seigneur et Sauveur de ma vie. Par la foi, je reçois maintenant la vie éternelle dans mon esprit. Je déclare que je suis sauvé ; je suis né de nouveau ; je suis un enfant de Dieu. Mon passé est révolu, et j’ai maintenant une nouvelle vie en Christ, au Nom de Jésus. AMEN.'
+                : 'God of Mercy and Truth; I acknowledge that I am a sinner and I come to you in the Name of Jesus Christ your beloved Son. Your Word declares, “For whoever calls on the name of The Lord shall be saved” (Romans 10:13). I believe in my heart that Jesus Christ was baptized, died and resurrected for my redemption and justification. I ask Jesus to come into my life and be The Lord and Saviour of my life. By faith, I receive Eternal life now into my spirit. I declare I am saved; I am born again; I am a child of God. My past is over, and I have a new life now in Christ, in Jesus’ Name. AMEN.'}
             </Text>
           </View>
 
-          <View style={[styles.card, isDark && styles.darkCard]}>
-            <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{t(language, 'contentPermissions')}</Text>
-            <Text style={[styles.body, isDark && styles.darkBody]}>
-              Devotional text and Scripture quotations are published with ministry permission. Bible translation usage, editorial review, and monthly content permissions remain the responsibility of the ministry before public release.
-            </Text>
-          </View>
-
-          <View style={[styles.card, isDark && styles.darkCard]}>
-            <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{t(language, 'terms')}</Text>
-            <Text style={[styles.body, isDark && styles.darkBody]}>
-              This app provides spiritual reading and reflection content. It is not a substitute for pastoral care, professional counselling, or emergency support.
-            </Text>
-          </View>
-
+          {/* 3. CONTACT SUPPORT EMAIL */}
           <Pressable
             onPress={() => Linking.openURL(`mailto:${supportEmail}`)}
             style={styles.supportButton}
@@ -67,6 +63,7 @@ export default function LegalScreen() {
             </View>
             <AppIcon name="chevron.right" size={16} tintColor={DewDesign.colors.white} />
           </Pressable>
+
           <Text style={[styles.version, isDark && styles.darkMuted]}>Daily Dew Devotional · Version 1.0</Text>
         </ScrollView>
         <AppBottomNav />
@@ -92,6 +89,11 @@ const styles = StyleSheet.create({
   card: { backgroundColor: DewDesign.colors.surface, borderRadius: 16, padding: 18, marginBottom: 12, borderWidth: 1, borderColor: DewDesign.colors.line },
   sectionTitle: { color: DewDesign.colors.ink, fontSize: 17, fontWeight: '900', marginBottom: 8 },
   body: { color: DewDesign.colors.body, fontSize: 14, lineHeight: 22 },
+  prayerCard: { backgroundColor: DewDesign.colors.forestSoft, borderLeftWidth: 4, borderLeftColor: DewDesign.colors.forest, padding: 20 },
+  darkPrayerCard: { backgroundColor: DewDesign.colors.darkSurfaceMuted, borderLeftColor: DewDesign.colors.forest },
+  prayerHeadingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  prayerTitle: { color: DewDesign.colors.forest, fontSize: 14, fontWeight: '900', letterSpacing: 1.2, marginBottom: 0 },
+  prayerBody: { fontFamily: 'serif', fontSize: 15, lineHeight: 25, fontStyle: 'italic' },
   supportButton: { backgroundColor: DewDesign.colors.forest, borderRadius: 14, minHeight: 62, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 8 },
   supportCopy: { flex: 1 },
   supportTitle: { color: DewDesign.colors.white, fontSize: 14, fontWeight: '900' },
