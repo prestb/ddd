@@ -126,13 +126,13 @@ export default function LibraryScreen() {
               {visibleDevotions.map(({ devotion, index }) => {
                 const complete = completedDays.includes(index);
                 const bookmarked = bookmarks.includes(index);
-                const isLocked = Boolean(edition?.isLocked);
+                const isLocked = Boolean(devotion.isLocked || edition?.isLocked);
                 return (
                   <Pressable
                     key={devotion.day}
                     onPress={() => router.push(isLocked ? '/membership' as any : { pathname: '/devotional', params: { day: String(index) } })}
                     accessibilityRole="button"
-                    accessibilityLabel={`Day ${devotion.day}: ${devotion.title}`}
+                    accessibilityLabel={`Day ${devotion.day}: ${devotion.title}${isLocked ? ' (Locked)' : ''}`}
                     style={({ pressed }) => [styles.entry, isDark && styles.darkCard, pressed && styles.pressed]}>
                     <View style={[styles.dayNumber, complete && styles.dayNumberComplete, isDark && !complete && styles.darkDayNumber]}>
                       {complete ? (

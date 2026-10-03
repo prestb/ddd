@@ -67,8 +67,9 @@ export default function DevotionalScreen() {
     );
   }
 
-  // Premium Locked Guard: Prevent serving protected meditation content to unauthorized clients
-  if (edition?.isLocked) {
+  // Day-Level & Edition-Level Premium Locked Guard
+  const isLocked = Boolean(devotion?.isLocked || edition?.isLocked);
+  if (isLocked) {
     return (
       <View style={[styles.screen, isDark && styles.darkScreen]}>
         <SafeAreaView style={[styles.safeArea, isDark && styles.darkScreen]}>
@@ -90,7 +91,7 @@ export default function DevotionalScreen() {
                 <SymbolView name="sparkles" size={24} tintColor={DewDesign.colors.terracotta} />
               </View>
               <Text style={[styles.premiumLockedTitle, isDark && styles.darkInk]}>{t(language, 'premiumRequiredTitle')}</Text>
-              <Text style={[styles.premiumLockedText, isDark && styles.darkMuted]}>{t(language, 'premiumRequiredMsg')}</Text>
+              <Text style={[styles.premiumLockedText, isDark && styles.darkMuted]}>{t(language, 'unlockDayPrompt')}</Text>
 
               <Pressable
                 onPress={() => router.push('/membership' as any)}

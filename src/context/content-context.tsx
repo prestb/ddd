@@ -29,7 +29,7 @@ type ContentContextValue = {
 
 const ContentContext = createContext<ContentContextValue | null>(null);
 const contentCacheKey = (language: 'en' | 'fr', slug = 'fallback') => getEditionCacheKey(language, slug);
-const latestCacheKey = (language: 'en' | 'fr') => `daily-dew-latest-content-v2-${language}`;
+const latestCacheKey = (language: 'en' | 'fr') => `daily-dew-latest-content-v3-${language}`;
 
 export function ContentProvider({ children }: PropsWithChildren) {
   const { language } = useSettings();
@@ -59,7 +59,6 @@ export function ContentProvider({ children }: PropsWithChildren) {
             // If cached edition is premium AND (user is signed out OR active session user ID does NOT match cached user ID)
             if (isPremiumEdition && (!session || !isOwnerMatch)) {
               setEdition({ ...parsed.edition, isLocked: true });
-              // Strip ALL protected premium body fields from active memory
               setDevotions(
                 parsed.devotions.map((d: Devotion) => ({
                   ...d,
@@ -68,6 +67,7 @@ export function ContentProvider({ children }: PropsWithChildren) {
                   wisdom: '',
                   declaration: '',
                   furtherStudies: [],
+                  isLocked: true,
                 }))
               );
             } else {
@@ -86,7 +86,7 @@ export function ContentProvider({ children }: PropsWithChildren) {
     return () => { active = false; };
   }, [language, session]);
 
-  // 2. Fetch Latest Published Content from Supabase (Silent Sync & RLS Enforced)
+  // 2. Fetch Latest Published Content from Supabase (Server-Enforced Day-Level & Edition-Level Gating)
   useEffect(() => {
     let cancelled = false;
 
@@ -98,6 +98,59 @@ export function ContentProvider({ children }: PropsWithChildren) {
       }
 
       try {
+        // Try server-enforced day-level RPC first
+        const { data: rpcRows, error: rpcError } = await client.rpc('get_published_edition_devotions', {
+          p_language: language,
+        });
+
+        if (!rpcError && Array.isArray(rpcRows) && rpcRows.length > 0 && !cancelled) {
+          const first = rpcRows[0];
+          const fetchedEdition: EditionMeta = {
+            slug: first.edition_slug,
+            title: first.edition_title,
+            theme: first.edition_theme,
+            introduction: first.edition_introduction ?? '',
+            month: first.edition_month,
+            year: first.edition_year,
+            access_level: first.edition_access_level ?? 'free',
+            isLocked: first.edition_access_level === 'premium' && Boolean(first.is_locked),
+          };
+
+          const nextDevotions: Devotion[] = rpcRows.map((row) => ({
+            day: row.day_number,
+            weekday: row.weekday,
+            title: row.title,
+            scripture: row.scripture_reference,
+            preview: row.meditation ? row.meditation.slice(0, 220) : '',
+            meditation: row.meditation ?? '',
+            furtherStudies: Array.isArray(row.further_studies) ? row.further_studies : [],
+            wisdom: row.wisdom_nugget ?? '',
+            declaration: row.declaration ?? '',
+            isLocked: Boolean(row.is_locked),
+          }));
+
+          const checked = validateDevotions(nextDevotions);
+          if (checked.valid.length > 0) {
+            setDevotions(checked.valid);
+            setEdition(fetchedEdition);
+            setSource('cloud');
+            setError(null);
+
+            const cachePayload = JSON.stringify({
+              edition: fetchedEdition,
+              devotions: checked.valid,
+              cachedUserId: session?.user?.id ?? null,
+            });
+
+            AsyncStorage.multiSet([
+              [contentCacheKey(language, fetchedEdition.slug), JSON.stringify(checked.valid)],
+              [latestCacheKey(language), cachePayload],
+            ]).catch(() => undefined);
+            return;
+          }
+        }
+
+        // Fallback: Standard Table Select if RPC is unavailable
         const { data: publishedEdition, error: editionError } = await client
           .from('editions')
           .select('id, slug, title, theme, introduction, month, year, access_level')
@@ -124,7 +177,6 @@ export function ContentProvider({ children }: PropsWithChildren) {
 
         if (editionError || !selectedEdition) {
           if (cancelled) return;
-          // Keep cached data intact if available; only show error if no cached content exists
           setSource('offline');
           setLoading(false);
           return;
@@ -144,17 +196,22 @@ export function ContentProvider({ children }: PropsWithChildren) {
         }
 
         if (rows && rows.length > 0 && !cancelled) {
-          const nextDevotions = rows.map((row) => ({
-            day: row.day_number,
-            weekday: row.weekday,
-            title: row.title,
-            scripture: row.scripture_reference,
-            preview: row.meditation.slice(0, 220),
-            meditation: row.meditation,
-            furtherStudies: Array.isArray(row.further_studies) ? row.further_studies : [],
-            wisdom: row.wisdom_nugget ?? '',
-            declaration: row.declaration ?? '',
-          }));
+          const isEditionPremium = selectedEdition.access_level === 'premium';
+          const nextDevotions: Devotion[] = rows.map((row) => {
+            const isDayLocked = isEditionPremium || row.day_number > 3;
+            return {
+              day: row.day_number,
+              weekday: row.weekday,
+              title: row.title,
+              scripture: row.scripture_reference,
+              preview: !isDayLocked && row.meditation ? row.meditation.slice(0, 220) : '',
+              meditation: isDayLocked ? '' : (row.meditation ?? ''),
+              furtherStudies: isDayLocked ? [] : (Array.isArray(row.further_studies) ? row.further_studies : []),
+              wisdom: isDayLocked ? '' : (row.wisdom_nugget ?? ''),
+              declaration: isDayLocked ? '' : (row.declaration ?? ''),
+              isLocked: isDayLocked,
+            };
+          });
 
           const metadata = { slug: selectedEdition.slug, title: selectedEdition.title, theme: selectedEdition.theme, month: selectedEdition.month, year: selectedEdition.year };
           const checked = validateDevotions(nextDevotions);

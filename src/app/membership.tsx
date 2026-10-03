@@ -173,7 +173,7 @@ export default function MembershipScreen() {
             <Text style={[styles.statusDesc, isDark && styles.darkBody]}>
               {isPremium
                 ? t(language, 'activeUntil').replace('{date}', expiresAt ?? 'July 31, 2026')
-                : t(language, 'freeDesc')}
+                : t(language, 'freeDaysNote')}
             </Text>
           </View>
 

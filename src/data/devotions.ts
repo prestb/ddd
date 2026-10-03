@@ -12,6 +12,7 @@ export type Devotion = {
   furtherStudies: string[];
   wisdom: string;
   declaration: string;
+  isLocked?: boolean;
 };
 
 export const DAILY_DEVOTIONS = SHILOH_JULY_2026;
