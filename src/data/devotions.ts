@@ -31,6 +31,25 @@ const FALLBACK_DEVOTION: Devotion = SHILOH_JULY_2026[0] ?? {
 
 export function localizeDevotion(base: Devotion | null | undefined, index: number, language: SupportedLanguage): Devotion {
   const safeBase = base ?? DAILY_DEVOTIONS[index] ?? DAILY_DEVOTIONS[0] ?? FALLBACK_DEVOTION;
+
+  // Security Guard: If devotion is locked, preserve empty protected fields and only localize safe metadata
+  if (safeBase.isLocked) {
+    if (language === 'en') return safeBase;
+    const translated = FRENCH_JULY_SAMPLE[index];
+    if (!translated) return safeBase;
+    return {
+      ...safeBase,
+      weekday: translated.weekday?.fr ?? safeBase.weekday,
+      title: translated.title?.fr ?? safeBase.title,
+      preview: '',
+      meditation: '',
+      wisdom: '',
+      declaration: '',
+      furtherStudies: [],
+      isLocked: true,
+    };
+  }
+
   if (language === 'en') return safeBase;
 
   const translated = FRENCH_JULY_SAMPLE[index];

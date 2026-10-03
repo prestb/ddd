@@ -5,7 +5,7 @@ import { type Devotion } from '@/data/devotions';
 import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/context/settings-context';
 import { useAuth } from '@/context/auth-context';
-import { getEditionCacheKey, isValidEditionMetadata, validateDevotions } from '@/lib/content-validation';
+import { getEditionCacheKey, validateDevotions } from '@/lib/content-validation';
 
 type EditionMeta = {
   slug: string;
@@ -86,7 +86,7 @@ export function ContentProvider({ children }: PropsWithChildren) {
     return () => { active = false; };
   }, [language, session]);
 
-  // 2. Fetch Latest Published Content from Supabase (Server-Enforced Day-Level & Edition-Level Gating)
+  // 2. Fetch Latest Published Content from Supabase (Server-Enforced Day-Level & Edition-Level Gating via RPC)
   useEffect(() => {
     let cancelled = false;
 
@@ -98,7 +98,7 @@ export function ContentProvider({ children }: PropsWithChildren) {
       }
 
       try {
-        // Try server-enforced day-level RPC first
+        // Authoritative server-enforced day-level RPC
         const { data: rpcRows, error: rpcError } = await client.rpc('get_published_edition_devotions', {
           p_language: language,
         });
@@ -150,100 +150,9 @@ export function ContentProvider({ children }: PropsWithChildren) {
           }
         }
 
-        // Fallback: Standard Table Select if RPC is unavailable
-        const { data: publishedEdition, error: editionError } = await client
-          .from('editions')
-          .select('id, slug, title, theme, introduction, month, year, access_level')
-          .eq('status', 'published')
-          .eq('language', language)
-          .order('year', { ascending: false })
-          .order('month', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        let selectedEdition = publishedEdition;
-        if (!selectedEdition && language !== 'en' && !editionError) {
-          const fallback = await client
-            .from('editions')
-            .select('id, slug, title, theme, introduction, month, year, language, access_level')
-            .eq('status', 'published')
-            .eq('language', 'en')
-            .order('year', { ascending: false })
-            .order('month', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          selectedEdition = fallback.data;
-        }
-
-        if (editionError || !selectedEdition) {
-          if (cancelled) return;
+        // If RPC is unavailable or returns an error, retain valid cached data without direct table fallback
+        if (!cancelled) {
           setSource('offline');
-          setLoading(false);
-          return;
-        }
-
-        const { data: rows, error: devotionError } = await client
-          .from('devotions')
-          .select('day_number, weekday, title, scripture_reference, meditation, further_studies, wisdom_nugget, declaration')
-          .eq('edition_id', selectedEdition.id)
-          .order('day_number', { ascending: true });
-
-        if (devotionError) {
-          if (cancelled) return;
-          setSource('offline');
-          setLoading(false);
-          return;
-        }
-
-        if (rows && rows.length > 0 && !cancelled) {
-          const isEditionPremium = selectedEdition.access_level === 'premium';
-          const nextDevotions: Devotion[] = rows.map((row) => {
-            const isDayLocked = isEditionPremium || row.day_number > 3;
-            return {
-              day: row.day_number,
-              weekday: row.weekday,
-              title: row.title,
-              scripture: row.scripture_reference,
-              preview: !isDayLocked && row.meditation ? row.meditation.slice(0, 220) : '',
-              meditation: isDayLocked ? '' : (row.meditation ?? ''),
-              furtherStudies: isDayLocked ? [] : (Array.isArray(row.further_studies) ? row.further_studies : []),
-              wisdom: isDayLocked ? '' : (row.wisdom_nugget ?? ''),
-              declaration: isDayLocked ? '' : (row.declaration ?? ''),
-              isLocked: isDayLocked,
-            };
-          });
-
-          const metadata = { slug: selectedEdition.slug, title: selectedEdition.title, theme: selectedEdition.theme, month: selectedEdition.month, year: selectedEdition.year };
-          const checked = validateDevotions(nextDevotions);
-
-          if (isValidEditionMetadata(metadata) && checked.valid.length > 0) {
-            const cachedEdition: EditionMeta = {
-              slug: selectedEdition.slug,
-              title: selectedEdition.title,
-              theme: selectedEdition.theme,
-              introduction: selectedEdition.introduction ?? '',
-              month: selectedEdition.month,
-              year: selectedEdition.year,
-              access_level: selectedEdition.access_level ?? 'free',
-              isLocked: selectedEdition.access_level === 'premium',
-            };
-
-            setDevotions(checked.valid);
-            setEdition(cachedEdition);
-            setSource('cloud');
-            setError(null);
-
-            const cachePayload = JSON.stringify({
-              edition: cachedEdition,
-              devotions: checked.valid,
-              cachedUserId: session?.user?.id ?? null,
-            });
-
-            AsyncStorage.multiSet([
-              [contentCacheKey(language, selectedEdition.slug), JSON.stringify(checked.valid)],
-              [latestCacheKey(language), cachePayload],
-            ]).catch(() => undefined);
-          }
         }
       } catch {
         // Network/offline exception: silently retain cached state
