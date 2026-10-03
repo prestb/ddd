@@ -55,10 +55,18 @@ Deno.serve(async (request) => {
     // 1. Locate payment_transactions row for this user and transId
     const { data: paymentTx, error: selectError } = await admin
       .from('payment_transactions')
-      .select('id, user_id, amount, status, purpose, provider_transaction_id')
+      .select('id, user_id, amount, status, purpose, provider_transaction_id, external_reference')
       .or(`provider_transaction_id.eq.${transId},external_reference.eq.${transId}`)
       .eq('user_id', user.id)
       .maybeSingle();
+
+    console.log('WALLET_STATUS_LOOKUP', {
+      hasTransId: Boolean(transId),
+      transactionFound: Boolean(paymentTx),
+      purpose: paymentTx?.purpose ?? null,
+      internalStatus: paymentTx?.status ?? null,
+      hasProviderTransactionId: Boolean(paymentTx?.provider_transaction_id),
+    });
 
     if (selectError) {
       console.error('check-wallet-deposit-status: Database query error', selectError);
@@ -84,6 +92,12 @@ Deno.serve(async (request) => {
 
     const targetTransId = paymentTx.provider_transaction_id ?? transId;
 
+    console.log('FAPSHI_STATUS_REQUEST', {
+      environment: 'live',
+      baseUrl: baseUrl.replace(/\/$/, ''),
+      transId: targetTransId,
+    });
+
     // 2. Query authoritative Fapshi status API
     const fapshiRes = await fetch(`${baseUrl.replace(/\/$/, '')}/payment-status/${targetTransId}`, {
       method: 'GET',
@@ -100,10 +114,24 @@ Deno.serve(async (request) => {
     let fapshiData: any = {};
     try { fapshiData = rawText ? JSON.parse(rawText) : {}; } catch { fapshiData = { message: rawText }; }
 
+    console.log('FAPSHI_STATUS_RESPONSE', {
+      httpStatus: fapshiRes.status,
+      transId: fapshiData?.transId ?? targetTransId,
+      providerStatus: fapshiData?.status ?? fapshiData?.paymentStatus ?? null,
+      providerAmount: fapshiData?.amount ?? null,
+      providerMessage: fapshiData?.message ?? null,
+    });
+
     const providerStatus = fapshiData?.status ?? fapshiData?.paymentStatus;
     const providerAmount = Number(fapshiData?.amount) || paymentTx.amount;
 
     if (providerStatus === 'SUCCESSFUL' || providerStatus === 'SUCCESS') {
+      console.log('WALLET_FULFILLMENT_RPC_REQUEST', {
+        providerTransactionId: targetTransId,
+        providerAmount,
+        expectedAmount: paymentTx.amount,
+      });
+
       // Execute atomic process_verified_wallet_deposit RPC
       const { data: processResult, error: rpcError } = await admin.rpc('process_verified_wallet_deposit', {
         p_provider_transaction_id: targetTransId,
@@ -112,7 +140,12 @@ Deno.serve(async (request) => {
       });
 
       if (rpcError) {
-        console.error('check-wallet-deposit-status: process_verified_wallet_deposit RPC failed', rpcError);
+        console.error('WALLET_FULFILLMENT_RPC_ERROR', {
+          code: rpcError?.code ?? null,
+          message: rpcError?.message ?? null,
+          details: rpcError?.details ?? null,
+          hint: rpcError?.hint ?? null,
+        });
         return json({ error: 'PAYMENT_FULFILLMENT_FAILED', message: 'Wallet deposit fulfillment failed.' }, 500);
       }
 
