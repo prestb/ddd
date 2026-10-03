@@ -1,5 +1,6 @@
 -- UX-11 ADMIN OPERATIONS: Security Definer Financial Summary RPC Function
 -- Calculates exact summary metrics directly across full underlying accounting tables without table limit truncations.
+-- Internal service-role function: Invoked strictly server-side by the admin-financials Edge Function after Admin verification.
 
 create or replace function public.get_admin_financial_summary()
 returns jsonb
@@ -8,8 +9,6 @@ security definer
 set search_path = public
 as $$
 declare
-  v_user_id uuid;
-  v_is_admin boolean;
   v_total_deposits integer;
   v_total_donations integer;
   v_total_sub_revenue integer;
@@ -20,19 +19,6 @@ declare
   v_count_sub_txs integer;
   v_count_donations integer;
 begin
-  v_user_id := auth.uid();
-
-  -- Verify administrator role if user session is present
-  if v_user_id is not null then
-    select exists (
-      select 1 from public.profiles p where p.id = v_user_id and p.role = 'admin'
-    ) into v_is_admin;
-
-    if not v_is_admin then
-      raise exception 'Only Ministry Administrators can access financial summaries.';
-    end if;
-  end if;
-
   -- Calculate total successful wallet deposits in XAF
   select coalesce(sum(amount), 0), count(*)
   into v_total_deposits, v_count_payments
@@ -80,5 +66,6 @@ begin
 end;
 $$;
 
-revoke execute on function public.get_admin_financial_summary() from public, anon;
-grant execute on function public.get_admin_financial_summary() to service_role, postgres, authenticated;
+-- Restrict execution privileges: Only service_role and postgres can execute get_admin_financial_summary
+revoke execute on function public.get_admin_financial_summary() from public, anon, authenticated;
+grant execute on function public.get_admin_financial_summary() to service_role, postgres;
