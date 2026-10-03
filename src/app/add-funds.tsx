@@ -115,6 +115,7 @@ export default function AddFundsScreen() {
   const [transId, setTransId] = useState<string | null>(null);
   const [updatedBalance, setUpdatedBalance] = useState<number | null>(null);
   const [verifiedAmount, setVerifiedAmount] = useState<number | null>(null);
+  const [balanceUnavailable, setBalanceUnavailable] = useState(false);
 
   const isCheckingRef = useRef(false);
   const amount = customAmountText ? (parseInt(customAmountText, 10) || 0) : selectedAmount;
@@ -170,11 +171,18 @@ export default function AddFundsScreen() {
       const result = await walletFundingService.verifyDepositStatus(transId);
 
       if (result.status === 'successful') {
+        if (result.amount) setVerifiedAmount(result.amount);
         const freshBalance = session?.user.id
           ? await walletFundingService.getUserBalance(session.user.id)
           : null;
-        if (result.amount) setVerifiedAmount(result.amount);
-        setUpdatedBalance(freshBalance ?? (result.amount || amount));
+
+        if (typeof freshBalance === 'number') {
+          setUpdatedBalance(freshBalance);
+          setBalanceUnavailable(false);
+        } else {
+          setUpdatedBalance(null);
+          setBalanceUnavailable(true);
+        }
         setErrorMessage(null);
         setStep('success');
       } else if (result.status === 'failed' || result.status === 'cancelled') {
@@ -448,8 +456,21 @@ export default function AddFundsScreen() {
                 </View>
                 <View style={styles.receiptRow}>
                   <Text style={styles.receiptLabel}>{t(language, 'updatedBalance')}</Text>
-                  <Text style={styles.receiptBalance}>{`${(updatedBalance ?? amount).toLocaleString()} XAF`}</Text>
+                  <Text style={styles.receiptBalance}>
+                    {updatedBalance !== null
+                      ? `${updatedBalance.toLocaleString()} XAF`
+                      : language === 'fr'
+                      ? 'Indisponible'
+                      : 'Unable to load'}
+                  </Text>
                 </View>
+                {balanceUnavailable ? (
+                  <Text style={styles.balanceNotice}>
+                    {language === 'fr'
+                      ? 'Votre paiement a été crédité avec succès, mais votre dernier solde n’a pas pu être chargé. Veuillez rafraîchir pour voir votre solde actuel.'
+                      : 'Your payment was credited successfully, but your latest balance could not be loaded. Please refresh to see your current balance.'}
+                  </Text>
+                ) : null}
                 {transId ? (
                   <View style={styles.receiptRow}>
                     <Text style={styles.receiptLabel}>{t(language, 'transactionRef')}</Text>
@@ -559,6 +580,7 @@ const styles = StyleSheet.create({
   receiptAmount: { fontSize: 16, fontWeight: '800', color: DewDesign.colors.forest },
   receiptBalance: { fontSize: 18, fontWeight: '900', color: DewDesign.colors.forest },
   receiptRef: { fontSize: 11, fontWeight: '800', color: DewDesign.colors.body },
+  balanceNotice: { fontSize: 11, lineHeight: 16, color: DewDesign.colors.body, marginTop: 8, fontStyle: 'italic', textAlign: 'center' },
   successBtn: { width: '100%', backgroundColor: DewDesign.colors.forest, marginTop: 20 },
   failedCard: { backgroundColor: DewDesign.colors.surface, borderRadius: DewDesign.radius.card, padding: 22, alignItems: 'center', borderWidth: 1, borderColor: DewDesign.colors.line },
   failedIconCircle: { width: 52, height: 52, borderRadius: 26, backgroundColor: DewDesign.colors.terracottaSoft, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
