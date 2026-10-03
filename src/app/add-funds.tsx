@@ -3,6 +3,8 @@ import AppBottomNav from '@/components/app-bottom-nav';
 import DailyDewHeader from '@/components/daily-dew-header';
 import { DewDesign } from '@/constants/design';
 import { router } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
+import * as Linking from 'expo-linking';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,8 +17,8 @@ type PaymentStep = 'select' | 'review' | 'pending' | 'success' | 'failed';
 type MobileMoneyProvider = 'mtn' | 'orange';
 
 /**
- * Isolated Wallet Funding Service Boundary (UX-08A Correction)
- * Connects exclusively to the future financial backend (create-wallet-deposit & payment_transactions).
+ * Isolated Wallet Funding Service Boundary
+ * Connects exclusively to the financial backend (create-wallet-deposit & payment_transactions).
  * Zero dependency on create-donation or donations table.
  */
 export const walletFundingService = {
@@ -30,67 +32,74 @@ export const walletFundingService = {
     phone: string;
     provider: MobileMoneyProvider;
     email: string;
-  }): Promise<{ transId: string; externalId: string }> {
-    if (supabase) {
-      try {
-        const { data, error } = await supabase.functions.invoke('create-wallet-deposit', {
-          body: { amount, phone, provider, email },
-        });
-        if (!error && data?.transId) {
-          return { transId: data.transId, externalId: data.externalId ?? `deposit-${Date.now()}` };
-        }
-      } catch {
-        // Fallback to service boundary
-      }
+  }): Promise<{ link?: string; transId: string; externalId: string; amount?: number }> {
+    if (!supabase) {
+      throw new Error('Supabase client is not configured.');
     }
-    return { transId: `deposit-${Date.now()}`, externalId: `deposit-ext-${Date.now()}` };
+
+    const { data, error } = await supabase.functions.invoke('create-wallet-deposit', {
+      body: { amount, phone, provider, email },
+    });
+
+    if (error || !data?.transId) {
+      let message = error?.message || data?.error || 'Could not initiate Mobile Money payment.';
+      if (error && 'context' in error && error.context?.json) {
+        try {
+          const details = await error.context.json();
+          message = details?.error ?? message;
+        } catch { /* Keep SDK error */ }
+      }
+      throw new Error(message);
+    }
+
+    return {
+      link: data.link,
+      transId: data.transId,
+      externalId: data.externalReference ?? data.externalId ?? `deposit-${Date.now()}`,
+      amount: data.amount ?? amount,
+    };
   },
 
   async verifyDepositStatus(transId: string): Promise<{
     status: 'pending' | 'successful' | 'failed' | 'cancelled';
     amount?: number;
   }> {
-    if (supabase) {
-      try {
-        const { data, error } = await supabase
-          .from('payment_transactions')
-          .select('status, amount, provider_transaction_id')
-          .or(`provider_transaction_id.eq.${transId},external_reference.eq.${transId}`)
-          .maybeSingle();
-
-        if (!error && data?.status) {
-          const mappedStatus =
-            data.status === 'successful' || data.status === 'SUCCESS'
-              ? 'successful'
-              : data.status === 'failed' || data.status === 'cancelled'
-              ? 'failed'
-              : 'pending';
-          return { status: mappedStatus, amount: data.amount };
-        }
-      } catch {
-        // Fallback to service boundary
-      }
+    if (!supabase) {
+      return { status: 'pending' };
     }
+
+    const { data, error } = await supabase
+      .from('payment_transactions')
+      .select('status, amount, provider_transaction_id')
+      .or(`provider_transaction_id.eq.${transId},external_reference.eq.${transId}`)
+      .maybeSingle();
+
+    if (!error && data?.status) {
+      const mappedStatus =
+        data.status === 'successful' || data.status === 'SUCCESS'
+          ? 'successful'
+          : data.status === 'failed' || data.status === 'cancelled'
+          ? 'failed'
+          : 'pending';
+      return { status: mappedStatus, amount: data.amount };
+    }
+
     return { status: 'pending' };
   },
 
-  async getUserBalance(userId: string): Promise<number> {
+  async getUserBalance(userId: string): Promise<number | null> {
     if (supabase && userId) {
-      try {
-        const { data, error } = await supabase
-          .from('wallets')
-          .select('balance')
-          .eq('user_id', userId)
-          .maybeSingle();
+      const { data, error } = await supabase
+        .from('wallets')
+        .select('balance')
+        .eq('user_id', userId)
+        .maybeSingle();
 
-        if (!error && data?.balance !== undefined) {
-          return data.balance;
-        }
-      } catch {
-        // Fallback to cached default
+      if (!error && data?.balance !== undefined) {
+        return data.balance;
       }
     }
-    return 2500;
+    return null;
   },
 };
 
@@ -143,11 +152,14 @@ export default function AddFundsScreen() {
 
       setTransId(deposit.transId);
       setStep('pending');
-    } catch {
+
+      // Open hosted Fapshi checkout link via WebBrowser session
+      if (deposit.link) {
+        await WebBrowser.openAuthSessionAsync(deposit.link, Linking.createURL('membership'));
+      }
+    } catch (err) {
       setErrorMessage(
-        language === 'fr'
-          ? 'Impossible de démarrer le paiement. Vérifiez votre connexion.'
-          : 'Could not start payment. Please check your connection.'
+        err instanceof Error ? err.message : (language === 'fr' ? 'Impossible de démarrer le paiement.' : 'Could not start payment.')
       );
     } finally {
       setBusy(false);
@@ -165,8 +177,8 @@ export default function AddFundsScreen() {
       if (result.status === 'successful') {
         const freshBalance = session?.user.id
           ? await walletFundingService.getUserBalance(session.user.id)
-          : (2500 + (result.amount || amount));
-        setUpdatedBalance(freshBalance);
+          : null;
+        setUpdatedBalance(freshBalance ?? (result.amount || amount));
         setStep('success');
       } else if (result.status === 'failed' || result.status === 'cancelled') {
         setStep('failed');
@@ -174,8 +186,8 @@ export default function AddFundsScreen() {
         // Still pending
         setErrorMessage(
           language === 'fr'
-            ? 'Demande de rechargement enregistrée. Saisissez votre code PIN USSD sur votre téléphone pour valider.'
-            : 'Deposit request created. Please authorize the USSD prompt on your phone with your PIN.'
+            ? 'Demande de rechargement en cours. Validez le paiement sur la page Fapshi ou votre téléphone.'
+            : 'Deposit request pending. Complete the payment on the Fapshi page or your phone.'
         );
       }
     } catch {
@@ -404,7 +416,7 @@ export default function AddFundsScreen() {
                 </View>
                 <View style={styles.receiptRow}>
                   <Text style={styles.receiptLabel}>{t(language, 'updatedBalance')}</Text>
-                  <Text style={styles.receiptBalance}>{`${(updatedBalance ?? 2500).toLocaleString()} XAF`}</Text>
+                  <Text style={styles.receiptBalance}>{`${(updatedBalance ?? amount).toLocaleString()} XAF`}</Text>
                 </View>
                 {transId ? (
                   <View style={styles.receiptRow}>
