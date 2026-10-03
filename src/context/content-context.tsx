@@ -55,22 +55,35 @@ export function ContentProvider({ children }: PropsWithChildren) {
             const cachedUserId = parsed?.cachedUserId ?? null;
             const isOwnerMatch = Boolean(currentUserId && cachedUserId && currentUserId === cachedUserId);
 
-            // Verify active subscription status if session exists
+            // Verify active subscription status & admin/editor role if session exists
             let isUserSubscribed = false;
+            let isAdminOrEditor = false;
+
             if (supabase && session && currentUserId && isOwnerMatch) {
-              const { data: subData } = await supabase
-                .from('subscriptions')
-                .select('status, expires_at')
-                .eq('user_id', currentUserId)
-                .maybeSingle();
+              const [{ data: subData }, { data: profileData }] = await Promise.all([
+                supabase
+                  .from('subscriptions')
+                  .select('status, expires_at')
+                  .eq('user_id', currentUserId)
+                  .maybeSingle(),
+                supabase
+                  .from('profiles')
+                  .select('role')
+                  .eq('id', currentUserId)
+                  .maybeSingle(),
+              ]);
 
               if (subData?.status === 'active' && subData?.expires_at && new Date(subData.expires_at) > new Date()) {
                 isUserSubscribed = true;
               }
+
+              if (profileData?.role === 'admin' || profileData?.role === 'editor') {
+                isAdminOrEditor = true;
+              }
             }
 
-            // 1. Evaluate active subscriber entitlement
-            const hasFullAccess = isUserSubscribed;
+            // 1. Evaluate full content access (Subscriber OR Admin OR Editor)
+            const hasFullAccess = isUserSubscribed || isAdminOrEditor;
 
             // 2. Determine if sanitization is needed for Free / non-entitled or mismatched users
             const isOwnerMismatch = Boolean(cachedUserId && (!session || !isOwnerMatch));
