@@ -55,7 +55,7 @@ export default function AuthScreen() {
       if (result.error) {
         setFeedback({
           type: 'error',
-          title: t(language, 'authFeedbackSignInFailed'),
+          title: t(language, 'authFeedbackResetFailed'),
           message: result.error,
         });
       } else {
@@ -151,8 +151,9 @@ export default function AuthScreen() {
                 placeholderTextColor={isDark ? DewDesign.colors.darkMuted : '#A8ADA7'}
                 autoCapitalize="none"
                 keyboardType="email-address"
+                textContentType="emailAddress"
+                autoComplete="email"
                 style={[styles.input, isDark && styles.darkInput]}
-                accessibilityRole="search"
                 accessibilityLabel={t(language, 'emailAddress')}
               />
 
