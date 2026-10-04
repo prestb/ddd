@@ -208,6 +208,20 @@ export default function ProfileScreen() {
                 </Text>
 
                 <Pressable
+                  onPress={() => router.push('/change-email' as any)}
+                  style={[styles.securityRow, { marginBottom: 10 }]}
+                  accessibilityRole="button"
+                  accessibilityLabel={t(language, 'changeEmailBtn')}>
+                  <View style={styles.securityIconBox}>
+                    <AppIcon name="envelope" size={16} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
+                  </View>
+                  <Text style={[styles.securityRowTitle, isDark && styles.darkInk]}>
+                    {t(language, 'changeEmailBtn')}
+                  </Text>
+                  <AppIcon name="chevron.right" size={16} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />
+                </Pressable>
+
+                <Pressable
                   onPress={() => router.push('/change-password' as any)}
                   style={styles.securityRow}
                   accessibilityRole="button"

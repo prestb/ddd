@@ -15,6 +15,7 @@ type AuthContextValue = {
   resetPassword: (email: string, language?: AppLanguage) => Promise<{ error?: string }>;
   updatePassword: (password: string, language?: AppLanguage) => Promise<{ error?: string }>;
   changePassword: (currentPassword: string, newPassword: string, language?: AppLanguage) => Promise<{ error?: string }>;
+  changeEmail: (currentPassword: string, newEmail: string, language?: AppLanguage) => Promise<{ error?: string; needsConfirmation?: boolean }>;
   signOut: () => Promise<void>;
 };
 
@@ -192,6 +193,52 @@ export function AuthProvider({ children }: PropsWithChildren) {
         return {};
       } catch {
         return { error: t(language, 'authPasswordUpdateFailed') };
+      }
+    },
+    changeEmail: async (currentPassword: string, newEmail: string, language: AppLanguage = 'en') => {
+      if (!supabase) return { error: t(language, 'authEmailUpdateFailed') };
+      if (!session?.user?.email) {
+        return { error: t(language, 'authGenericError') };
+      }
+
+      const trimmedCurrentPassword = currentPassword;
+      const normalizedNewEmail = newEmail.trim().toLowerCase();
+
+      if (!trimmedCurrentPassword) {
+        return { error: t(language, 'currentPasswordRequired') };
+      }
+
+      if (!normalizedNewEmail || !normalizedNewEmail.includes('@')) {
+        return { error: t(language, 'authInvalidEmail') };
+      }
+
+      if (normalizedNewEmail === session.user.email.toLowerCase()) {
+        return { error: t(language, 'authSameEmailError') };
+      }
+
+      try {
+        // 1. Verify current credentials against session email
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: session.user.email,
+          password: trimmedCurrentPassword,
+        });
+
+        if (signInError) {
+          return { error: t(language, 'authCurrentPasswordIncorrect') };
+        }
+
+        // 2. Request email update after successful verification
+        const { error: updateError } = await supabase.auth.updateUser({
+          email: normalizedNewEmail,
+        });
+
+        if (updateError) {
+          return { error: t(language, 'authEmailUpdateFailed') };
+        }
+
+        return { needsConfirmation: true };
+      } catch {
+        return { error: t(language, 'authEmailUpdateFailed') };
       }
     },
     signOut: async () => {
