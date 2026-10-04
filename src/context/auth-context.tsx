@@ -3,14 +3,61 @@ import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useSt
 
 import { supabase } from '@/lib/supabase';
 import { recordAnalyticsEvent } from '@/lib/analytics';
+import { AppLanguage, t } from '@/lib/i18n';
 
 type AuthContextValue = {
   session: Session | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error?: string; needsConfirmation?: boolean }>;
-  signUp: (email: string, password: string) => Promise<{ error?: string; needsConfirmation?: boolean }>;
+  signIn: (email: string, password: string, language?: AppLanguage) => Promise<{ error?: string; needsConfirmation?: boolean }>;
+  signUp: (email: string, password: string, language?: AppLanguage) => Promise<{ error?: string; needsConfirmation?: boolean }>;
   signOut: () => Promise<void>;
 };
+
+export function mapAuthError(
+  rawError: { message?: string; name?: string; status?: number } | string | null | undefined,
+  mode: 'signin' | 'signup',
+  language: AppLanguage = 'en'
+): string {
+  if (!rawError) return '';
+  const msg = typeof rawError === 'string' ? rawError.toLowerCase() : (rawError.message ?? '').toLowerCase();
+
+  // Network / Fetch errors
+  if (msg.includes('network') || msg.includes('fetch') || msg.includes('failed to fetch')) {
+    return t(language, 'authNetworkError');
+  }
+
+  // Too many attempts / Rate limit
+  if (msg.includes('rate limit') || msg.includes('too many') || msg.includes('429')) {
+    return t(language, 'authTooManyAttempts');
+  }
+
+  // Invalid Email
+  if (msg.includes('invalid email') || msg.includes('email address is invalid') || msg.includes('email_invalid')) {
+    return t(language, 'authInvalidEmail');
+  }
+
+  // Weak Password (policy / length)
+  if (msg.includes('password') && (msg.includes('weak') || msg.includes('at least') || msg.includes('short') || msg.includes('policy'))) {
+    return t(language, 'authWeakPassword');
+  }
+
+  // Sign Up specific: Existing account
+  if (mode === 'signup') {
+    if (msg.includes('already registered') || msg.includes('already exists') || msg.includes('user_already_exists') || msg.includes('email_exists')) {
+      return t(language, 'authExistingAccount');
+    }
+  }
+
+  // Sign In specific: Invalid credentials (security anti-enumeration rule: same generic message)
+  if (mode === 'signin') {
+    if (msg.includes('invalid login credentials') || msg.includes('invalid_credentials') || msg.includes('user not found') || msg.includes('wrong password') || msg.includes('invalid_grant')) {
+      return t(language, 'authInvalidCredentials');
+    }
+  }
+
+  // Safe Fallback for any other provider / technical error
+  return t(language, 'authGenericError');
+}
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
@@ -44,16 +91,16 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const value = useMemo<AuthContextValue>(() => ({
     session,
     loading,
-    signIn: async (email, password) => {
-      if (!supabase) return { error: 'Cloud account service is not configured.' };
+    signIn: async (email, password, language = 'en') => {
+      if (!supabase) return { error: t(language, 'authGenericError') };
       const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-      return error ? { error: error.message } : {};
+      return error ? { error: mapAuthError(error, 'signin', language) } : {};
     },
-    signUp: async (email, password) => {
-      if (!supabase) return { error: 'Cloud account service is not configured.' };
+    signUp: async (email, password, language = 'en') => {
+      if (!supabase) return { error: t(language, 'authGenericError') };
       const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
       return error
-        ? { error: error.message }
+        ? { error: mapAuthError(error, 'signup', language) }
         : { needsConfirmation: !data.session };
     },
     signOut: async () => {

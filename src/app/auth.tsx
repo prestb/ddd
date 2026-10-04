@@ -47,7 +47,7 @@ export default function AuthScreen() {
     }
     setBusy(true);
     setMessage('');
-    const result = mode === 'signin' ? await signIn(email, password) : await signUp(email, password);
+    const result = mode === 'signin' ? await signIn(email, password, language) : await signUp(email, password, language);
     setBusy(false);
     if (result.error) setMessage(result.error);
     else if (result.needsConfirmation) setMessage(t(language, 'checkEmail'));
