@@ -5,17 +5,20 @@ import { supabase } from '@/lib/supabase';
 import { recordAnalyticsEvent } from '@/lib/analytics';
 import { AppLanguage, t } from '@/lib/i18n';
 
+const REDIRECT_RECOVERY_URL = 'devotionalapp://reset-password';
+
 type AuthContextValue = {
   session: Session | null;
   loading: boolean;
   signIn: (email: string, password: string, language?: AppLanguage) => Promise<{ error?: string; needsConfirmation?: boolean }>;
   signUp: (email: string, password: string, language?: AppLanguage) => Promise<{ error?: string; needsConfirmation?: boolean }>;
+  resetPassword: (email: string, language?: AppLanguage) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
 };
 
 export function mapAuthError(
   rawError: { message?: string; name?: string; status?: number } | string | null | undefined,
-  mode: 'signin' | 'signup',
+  mode: 'signin' | 'signup' | 'reset',
   language: AppLanguage = 'en'
 ): string {
   if (!rawError) return '';
@@ -39,6 +42,13 @@ export function mapAuthError(
   // Weak Password (policy / length)
   if (msg.includes('password') && (msg.includes('weak') || msg.includes('at least') || msg.includes('short') || msg.includes('policy'))) {
     return t(language, 'authWeakPassword');
+  }
+
+  // Reset Password specific generic error
+  if (mode === 'reset') {
+    if (msg.includes('unable to send') || msg.includes('recovery')) {
+      return t(language, 'authResetSendError');
+    }
   }
 
   // Sign Up specific: Existing account
@@ -102,6 +112,27 @@ export function AuthProvider({ children }: PropsWithChildren) {
       return error
         ? { error: mapAuthError(error, 'signup', language) }
         : { needsConfirmation: !data.session };
+    },
+    resetPassword: async (email, language = 'en') => {
+      if (!supabase) return { error: t(language, 'authGenericError') };
+      const trimmedEmail = email.trim().toLowerCase();
+      if (!trimmedEmail || !trimmedEmail.includes('@')) {
+        return { error: t(language, 'authInvalidEmail') };
+      }
+
+      try {
+        const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
+          redirectTo: REDIRECT_RECOVERY_URL,
+        });
+
+        if (error) {
+          return { error: mapAuthError(error, 'reset', language) };
+        }
+
+        return {};
+      } catch (err: any) {
+        return { error: mapAuthError(err, 'reset', language) };
+      }
     },
     signOut: async () => {
       await supabase?.auth.signOut();

@@ -13,7 +13,7 @@ import { t } from '@/lib/i18n';
 import { supabase } from '@/lib/supabase';
 
 export default function AuthScreen() {
-  const { session, signIn, signUp, signOut } = useAuth();
+  const { session, signIn, signUp, resetPassword, signOut } = useAuth();
   const { language, themeMode } = useSettings();
   const isDark = themeMode === 'dark';
   const [email, setEmail] = useState('');
@@ -21,7 +21,7 @@ export default function AuthScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const [mode, setMode] = useState<'signin' | 'signup' | 'recovery'>('signin');
   const [feedback, setFeedback] = useState<{ type: FeedbackType; title: string; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -38,6 +38,37 @@ export default function AuthScreen() {
   }, [session]);
 
   const submit = async () => {
+    if (mode === 'recovery') {
+      if (!email.trim() || !email.includes('@')) {
+        setFeedback({
+          type: 'warning',
+          title: t(language, 'authFeedbackCheckEmailTitle'),
+          message: t(language, 'authInvalidEmail'),
+        });
+        return;
+      }
+      setBusy(true);
+      setFeedback(null);
+      const result = await resetPassword(email, language);
+      setBusy(false);
+
+      if (result.error) {
+        setFeedback({
+          type: 'error',
+          title: t(language, 'authFeedbackSignInFailed'),
+          message: result.error,
+        });
+      } else {
+        // Anti-Account Enumeration Success Message
+        setFeedback({
+          type: 'info',
+          title: t(language, 'resetSuccessTitle'),
+          message: t(language, 'resetSuccessMessage'),
+        });
+      }
+      return;
+    }
+
     if (!email.trim() || password.length < 6) {
       setFeedback({
         type: 'warning',
@@ -88,8 +119,20 @@ export default function AuthScreen() {
         <DailyDewHeader />
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Text style={styles.kicker}>{t(language, 'accountJourney')}</Text>
-          <Text style={[styles.title, isDark && styles.darkInk]}>{session ? t(language, 'yourAccount') : t(language, 'keepJourney')}</Text>
-          <Text style={[styles.subtitle, isDark && styles.darkBody]}>{session ? t(language, 'accountReady') : t(language, 'signInReady')}</Text>
+          <Text style={[styles.title, isDark && styles.darkInk]}>
+            {session
+              ? t(language, 'yourAccount')
+              : mode === 'recovery'
+              ? t(language, 'resetPasswordHeading')
+              : t(language, 'keepJourney')}
+          </Text>
+          <Text style={[styles.subtitle, isDark && styles.darkBody]}>
+            {session
+              ? t(language, 'accountReady')
+              : mode === 'recovery'
+              ? t(language, 'resetPasswordSubtext')
+              : t(language, 'signInReady')}
+          </Text>
 
           {session ? (
             <View style={[styles.card, isDark && styles.darkCard]}>
@@ -112,58 +155,100 @@ export default function AuthScreen() {
                 accessibilityRole="search"
                 accessibilityLabel={t(language, 'emailAddress')}
               />
-              <View style={[styles.passwordRow, isDark && styles.darkInput]}>
-                <TextInput
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder={t(language, 'password')}
-                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : '#A8ADA7'}
-                  secureTextEntry={!showPassword}
-                  style={[styles.passwordInput, isDark && styles.darkInk]}
-                  accessibilityLabel={t(language, 'password')}
-                />
-                <Pressable
-                  onPress={() => setShowPassword(!showPassword)}
-                  accessibilityRole="button"
-                  accessibilityLabel={showPassword ? t(language, 'hidePassword') : t(language, 'showPassword')}>
-                  <AppIcon name={showPassword ? 'eye.slash' : 'eye'} size={18} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
-                </Pressable>
-              </View>
-              {mode === 'signup' && (
-                <View style={[styles.passwordRow, isDark && styles.darkInput]}>
-                  <TextInput
-                    value={confirmPassword}
-                    onChangeText={setConfirmPassword}
-                    placeholder={t(language, 'confirmPassword')}
-                    placeholderTextColor={isDark ? DewDesign.colors.darkMuted : '#A8ADA7'}
-                    secureTextEntry={!showConfirmPassword}
-                    style={[styles.passwordInput, isDark && styles.darkInk]}
-                    accessibilityLabel={t(language, 'confirmPassword')}
-                  />
-                  <Pressable
-                    onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                    accessibilityRole="button"
-                    accessibilityLabel={showConfirmPassword ? t(language, 'hidePassword') : t(language, 'showPassword')}>
-                    <AppIcon name={showConfirmPassword ? 'eye.slash' : 'eye'} size={18} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
-                  </Pressable>
-                </View>
+
+              {mode !== 'recovery' && (
+                <>
+                  <View style={[styles.passwordRow, isDark && styles.darkInput]}>
+                    <TextInput
+                      value={password}
+                      onChangeText={setPassword}
+                      placeholder={t(language, 'password')}
+                      placeholderTextColor={isDark ? DewDesign.colors.darkMuted : '#A8ADA7'}
+                      secureTextEntry={!showPassword}
+                      style={[styles.passwordInput, isDark && styles.darkInk]}
+                      accessibilityLabel={t(language, 'password')}
+                    />
+                    <Pressable
+                      onPress={() => setShowPassword(!showPassword)}
+                      accessibilityRole="button"
+                      accessibilityLabel={showPassword ? t(language, 'hidePassword') : t(language, 'showPassword')}>
+                      <AppIcon name={showPassword ? 'eye.slash' : 'eye'} size={18} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
+                    </Pressable>
+                  </View>
+
+                  {mode === 'signin' && (
+                    <Pressable
+                      onPress={() => { setMode('recovery'); setFeedback(null); }}
+                      accessibilityRole="button"
+                      accessibilityLabel={t(language, 'forgotPassword')}
+                      style={styles.forgotButton}>
+                      <Text style={styles.forgotText}>{t(language, 'forgotPassword')}</Text>
+                    </Pressable>
+                  )}
+
+                  {mode === 'signup' && (
+                    <View style={[styles.passwordRow, isDark && styles.darkInput]}>
+                      <TextInput
+                        value={confirmPassword}
+                        onChangeText={setConfirmPassword}
+                        placeholder={t(language, 'confirmPassword')}
+                        placeholderTextColor={isDark ? DewDesign.colors.darkMuted : '#A8ADA7'}
+                        secureTextEntry={!showConfirmPassword}
+                        style={[styles.passwordInput, isDark && styles.darkInk]}
+                        accessibilityLabel={t(language, 'confirmPassword')}
+                      />
+                      <Pressable
+                        onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                        accessibilityRole="button"
+                        accessibilityLabel={showConfirmPassword ? t(language, 'hidePassword') : t(language, 'showPassword')}>
+                        <AppIcon name={showConfirmPassword ? 'eye.slash' : 'eye'} size={18} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
+                      </Pressable>
+                    </View>
+                  )}
+                </>
               )}
+
               <Pressable
                 onPress={submit}
                 disabled={busy}
                 accessibilityRole="button"
-                accessibilityLabel={busy ? t(language, 'working') : mode === 'signin' ? t(language, 'login') : t(language, 'createAccount')}
+                accessibilityLabel={
+                  busy
+                    ? t(language, 'working')
+                    : mode === 'recovery'
+                    ? t(language, 'sendResetLink')
+                    : mode === 'signin'
+                    ? t(language, 'login')
+                    : t(language, 'createAccount')
+                }
                 style={styles.primaryButton}>
                 <Text style={styles.primaryText}>
-                  {busy ? t(language, 'working') : mode === 'signin' ? t(language, 'login') : t(language, 'createAccount')}
+                  {busy
+                    ? t(language, 'working')
+                    : mode === 'recovery'
+                    ? t(language, 'sendResetLink')
+                    : mode === 'signin'
+                    ? t(language, 'login')
+                    : t(language, 'createAccount')}
                 </Text>
               </Pressable>
+
               <Pressable
-                onPress={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setFeedback(null); }}
+                onPress={() => {
+                  setMode(mode === 'signin' ? 'signup' : 'signin');
+                  setFeedback(null);
+                }}
                 accessibilityRole="button"
                 style={styles.modeButton}>
-                <Text style={styles.modeText}>{mode === 'signin' ? t(language, 'newHere') : t(language, 'alreadyAccount')}</Text>
+                <Text style={styles.modeText}>
+                  {mode === 'recovery'
+                    ? t(language, 'backToSignIn')
+                    : mode === 'signin'
+                    ? t(language, 'newHere')
+                    : t(language, 'alreadyAccount')}
+                </Text>
               </Pressable>
+
               {feedback ? (
                 <AppFeedback
                   type={feedback.type}
@@ -206,11 +291,12 @@ const styles = StyleSheet.create({
   input: { height: 48, backgroundColor: DewDesign.colors.canvas, borderWidth: 1, borderColor: DewDesign.colors.line, borderRadius: 10, paddingHorizontal: 12, color: DewDesign.colors.ink, fontSize: 14, marginBottom: 10 },
   passwordRow: { minHeight: 48, backgroundColor: DewDesign.colors.canvas, borderWidth: 1, borderColor: DewDesign.colors.line, borderRadius: 10, flexDirection: 'row', alignItems: 'center', paddingRight: 12, marginBottom: 10 },
   passwordInput: { flex: 1, height: 46, paddingHorizontal: 12, color: DewDesign.colors.ink, fontSize: 14 },
+  forgotButton: { alignSelf: 'flex-end', marginTop: 2, marginBottom: 12 },
+  forgotText: { color: DewDesign.colors.terracotta, fontSize: 12, fontWeight: '800' },
   primaryButton: { minHeight: 48, borderRadius: 10, backgroundColor: DewDesign.colors.forest, alignItems: 'center', justifyContent: 'center', marginTop: 3 },
   primaryText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
   modeButton: { alignItems: 'center', paddingVertical: 13 },
   modeText: { color: DewDesign.colors.terracotta, fontSize: 12, fontWeight: '800' },
-  message: { color: DewDesign.colors.terracotta, fontSize: 12, lineHeight: 17, textAlign: 'center' },
   secondaryButton: { minHeight: 46, borderWidth: 1, borderColor: DewDesign.colors.forestMuted, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginTop: 18 },
   secondaryText: { color: DewDesign.colors.forest, fontSize: 13, fontWeight: '800' },
   note: { backgroundColor: DewDesign.colors.surfaceMuted, borderRadius: 14, padding: 16, marginTop: 18 },
