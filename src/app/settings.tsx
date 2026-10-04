@@ -95,6 +95,23 @@ export default function SettingsScreen() {
                 </Text>
               </Pressable>
             </View>
+
+            {session ? (
+              <Pressable
+                onPress={() => router.push('/profile' as any)}
+                style={[styles.settingRow, { marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: isDark ? DewDesign.colors.darkLine : DewDesign.colors.line }]}
+                accessibilityRole="button"
+                accessibilityLabel={t(language, 'profileHeading')}>
+                <View style={styles.settingIcon}>
+                  <SymbolView name="pencil" size={18} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
+                </View>
+                <View style={styles.copy}>
+                  <Text style={[styles.settingTitle, isDark && styles.darkInk]}>{t(language, 'profileHeading')}</Text>
+                  <Text style={[styles.settingMeta, isDark && styles.darkBody]}>{t(language, 'manageProfileDesc')}</Text>
+                </View>
+                <SymbolView name="chevron.right" size={16} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />
+              </Pressable>
+            ) : null}
           </View>
 
           {/* Appearance Section */}
