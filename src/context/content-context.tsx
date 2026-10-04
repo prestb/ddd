@@ -1,6 +1,6 @@
 import { createContext, PropsWithChildren, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import NetInfo from '@react-native-community/netinfo';
+import NetInfo, { NetInfoState } from '@react-native-community/netinfo';
 
 import { type Devotion } from '@/data/devotions';
 import { supabase } from '@/lib/supabase';
@@ -34,7 +34,7 @@ type ContentContextValue = {
 
 const ContentContext = createContext<ContentContextValue | null>(null);
 const contentCacheKey = (language: 'en' | 'fr', slug = 'fallback') => getEditionCacheKey(language, slug);
-const latestCacheKey = (language: 'en' | 'fr') => `daily-dew-latest-content-v3-${language}`;
+const latestCacheKey = (language: 'en' | 'fr', userId: string | null = null) => `daily-dew-latest-content-v4-${language}-${userId ?? 'anonymous'}`;
 
 export function ContentProvider({ children }: PropsWithChildren) {
   const { language } = useSettings();
@@ -47,8 +47,22 @@ export function ContentProvider({ children }: PropsWithChildren) {
   const [error, setError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
 
+  // In-Memory Content Owner State (Identifies which account identity owns the loaded content)
+  const [contentOwnerId, setContentOwnerId] = useState<string | null>(null);
+
   // Authoritative cloud content lock ref to prevent stale cache overwrites
   const isCloudLoadedRef = useRef(false);
+
+  // Immediately invalidate in-memory content when account session changes
+  useEffect(() => {
+    setDevotions([]);
+    setEdition(null);
+    setSource('none');
+    setError(null);
+    setLoading(true);
+    setContentOwnerId(null);
+    isCloudLoadedRef.current = false;
+  }, [session?.user?.id]);
 
   useEffect(() => {
     isCloudLoadedRef.current = false;
@@ -56,15 +70,10 @@ export function ContentProvider({ children }: PropsWithChildren) {
 
   // Native NetInfo Connectivity Listener
   useEffect(() => {
-    NetInfo.fetch().then((state) => {
-      if (state.isConnected === true) {
-        setNetworkStatus('online');
-      } else if (state.isConnected === false) {
-        setNetworkStatus('offline');
-      }
-    });
+    let active = true;
+    let latestEventVersion = 0;
 
-    const unsubscribe = NetInfo.addEventListener((state) => {
+    const applyNetworkState = (state: NetInfoState) => {
       if (state.isConnected === true) {
         setNetworkStatus('online');
       } else if (state.isConnected === false) {
@@ -72,25 +81,47 @@ export function ContentProvider({ children }: PropsWithChildren) {
       } else {
         setNetworkStatus('unknown');
       }
+    };
+
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      latestEventVersion += 1;
+      applyNetworkState(state);
     });
 
-    return unsubscribe;
+    const fetchVersion = latestEventVersion;
+
+    NetInfo.fetch()
+      .then((state) => {
+        if (active && latestEventVersion === fetchVersion) {
+          applyNetworkState(state);
+        }
+      })
+      .catch(() => {
+        if (active && latestEventVersion === fetchVersion) {
+          setNetworkStatus('unknown');
+        }
+      });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, []);
 
-  // 1. Instant Cache Hydration on Mount, Language Switch, or Account Session Change
+  // 1. Account-Isolated Cache Hydration on Mount, Language Switch, or Account Session Change
   useEffect(() => {
     let active = true;
     async function hydrateCache() {
       try {
-        const cachedRaw = await AsyncStorage.getItem(latestCacheKey(language));
+        const currentUserId = session?.user?.id ?? null;
+        const cachedRaw = await AsyncStorage.getItem(latestCacheKey(language, currentUserId));
         if (cachedRaw && active && !isCloudLoadedRef.current) {
           const parsed = JSON.parse(cachedRaw);
           if (parsed?.edition && Array.isArray(parsed?.devotions) && parsed.devotions.length > 0) {
             // Guard: Do not overwrite if authoritative cloud content has already committed
-            if (isCloudLoadedRef.current) return;
+            if (isCloudLoadedRef.current || !active) return;
 
             const isPremiumEdition = parsed.edition.access_level === 'premium';
-            const currentUserId = session?.user?.id ?? null;
             const cachedUserId = parsed?.cachedUserId ?? null;
             const isOwnerMatch = Boolean(currentUserId && cachedUserId && currentUserId === cachedUserId);
 
@@ -122,13 +153,15 @@ export function ContentProvider({ children }: PropsWithChildren) {
             }
 
             // Guard check again after async subscription lookups
-            if (isCloudLoadedRef.current) return;
+            if (isCloudLoadedRef.current || !active) return;
 
             // 1. Evaluate full content access (Subscriber OR Admin OR Editor)
             const hasFullAccess = isUserSubscribed || isAdminOrEditor;
 
             // 2. Determine if sanitization is needed for Free / non-entitled or mismatched users
             const isOwnerMismatch = Boolean(cachedUserId && (!session || !isOwnerMatch));
+
+            setContentOwnerId(currentUserId);
 
             if (!hasFullAccess) {
               // Free / Non-Entitled User
@@ -227,6 +260,8 @@ export function ContentProvider({ children }: PropsWithChildren) {
           const checked = validateDevotions(nextDevotions);
           if (checked.valid.length > 0) {
             isCloudLoadedRef.current = true; // Mark Cloud Content as Authoritatively Committed
+            const currentUserId = session?.user?.id ?? null;
+            setContentOwnerId(currentUserId);
             setDevotions(checked.valid);
             setEdition(fetchedEdition);
             setSource('cloud');
@@ -237,13 +272,13 @@ export function ContentProvider({ children }: PropsWithChildren) {
             const cachePayload = JSON.stringify({
               edition: fetchedEdition,
               devotions: checked.valid,
-              cachedUserId: session?.user?.id ?? null,
+              cachedUserId: currentUserId,
               cachedUserEntitlement: hasFullPremiumAccess ? 'premium' : 'free',
             });
 
             AsyncStorage.multiSet([
               [contentCacheKey(language, fetchedEdition.slug), JSON.stringify(checked.valid)],
-              [latestCacheKey(language), cachePayload],
+              [latestCacheKey(language, currentUserId), cachePayload],
             ]).catch(() => undefined);
             return;
           }
@@ -314,7 +349,21 @@ export function ContentProvider({ children }: PropsWithChildren) {
   }, [language, reloadToken, session]);
 
   const refresh = useCallback(() => setReloadToken((value) => value + 1), []);
-  const value = useMemo(() => ({ devotions, edition, source, networkStatus, loading, error, refresh }), [devotions, edition, source, networkStatus, loading, error, refresh]);
+
+  const value = useMemo(() => {
+    const currentUserId = session?.user?.id ?? null;
+    const contentBelongsToCurrentAccount = contentOwnerId === currentUserId;
+
+    return {
+      devotions: contentBelongsToCurrentAccount ? devotions : [],
+      edition: contentBelongsToCurrentAccount ? edition : null,
+      source: contentBelongsToCurrentAccount ? source : 'none',
+      networkStatus,
+      loading,
+      error,
+      refresh,
+    };
+  }, [contentOwnerId, devotions, edition, error, loading, networkStatus, refresh, session?.user?.id, source]);
 
   return <ContentContext.Provider value={value}>{children}</ContentContext.Provider>;
 }
