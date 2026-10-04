@@ -49,10 +49,19 @@ export default function ProfileScreen() {
         .maybeSingle();
 
       if (active) {
-        if (!error && data) {
+        if (error) {
+          setFeedback({
+            type: 'error',
+            title: language === 'fr' ? 'Erreur de profil' : 'Could not load profile',
+            message: language === 'fr'
+              ? 'Nous n’avons pas pu charger votre profil pour le moment. Veuillez réessayer.'
+              : 'Could not load your profile details right now. Please try again.',
+          });
+        } else if (data) {
           setDisplayName(data.display_name ?? '');
           setRole(data.role ?? 'reader');
         } else {
+          // Missing profile row (data is null, error is null)
           setDisplayName('');
           setRole('reader');
         }
@@ -65,7 +74,7 @@ export default function ProfileScreen() {
     return () => {
       active = false;
     };
-  }, [session]);
+  }, [language, session]);
 
   const handleSaveProfile = async () => {
     if (!session || !supabase) return;
@@ -74,12 +83,12 @@ export default function ProfileScreen() {
     setSaving(true);
     setFeedback(null);
 
+    // Strictly write ONLY id and display_name to protect administrative roles
     const { error } = await supabase
       .from('profiles')
       .upsert({
         id: session.user.id,
         display_name: trimmedName,
-        role: role || 'reader',
       }, { onConflict: 'id' });
 
     setSaving(false);
