@@ -13,7 +13,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, 
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function ResetPasswordScreen() {
-  const { session, updatePassword } = useAuth();
+  const { updatePassword } = useAuth();
   const { language, themeMode } = useSettings();
   const isDark = themeMode === 'dark';
 
@@ -30,8 +30,8 @@ export default function ResetPasswordScreen() {
   useEffect(() => {
     let cancelled = false;
 
-    async function handleIncomingDeepLink(url: string | null) {
-      if (!url || !supabase) return;
+    async function processRecoveryUrl(url: string | null): Promise<boolean> {
+      if (!url || !supabase) return false;
       try {
         const hash = url.split('#')[1] ?? '';
         const params = new URLSearchParams(hash);
@@ -44,8 +44,7 @@ export default function ResetPasswordScreen() {
             refresh_token: refreshToken,
           });
           if (!error && data.session && !cancelled) {
-            setHasValidRecoverySession(true);
-            return;
+            return true;
           }
         }
 
@@ -54,40 +53,37 @@ export default function ResetPasswordScreen() {
         if (code) {
           const { data, error } = await supabase.auth.exchangeCodeForSession(code);
           if (!error && data.session && !cancelled) {
-            setHasValidRecoverySession(true);
-            return;
+            return true;
           }
         }
       } catch {
-        // Ignore deep-link parse exceptions
+        // Ignore deep link parse exceptions
       }
+      return false;
     }
 
-    async function checkSessionState() {
+    async function initializeRecoveryCheck() {
       setVerifyingSession(true);
       const initialUrl = await Linking.getInitialURL().catch(() => null);
+      let isValidRecovery = false;
+
       if (initialUrl) {
-        await handleIncomingDeepLink(initialUrl);
+        isValidRecovery = await processRecoveryUrl(initialUrl);
       }
 
       if (!cancelled) {
-        // Re-check current active session
-        const currentSession = session ?? (await supabase?.auth.getSession().catch(() => null))?.data?.session;
-        setHasValidRecoverySession(Boolean(currentSession));
+        setHasValidRecoverySession(isValidRecovery);
         setVerifyingSession(false);
       }
     }
 
-    checkSessionState();
+    initializeRecoveryCheck();
 
     const subscription = Linking.addEventListener('url', (event) => {
-      handleIncomingDeepLink(event.url).then(() => {
-        if (!cancelled && supabase) {
-          supabase.auth.getSession().then(({ data }) => {
-            if (!cancelled) {
-              setHasValidRecoverySession(Boolean(data.session));
-            }
-          }).catch(() => undefined);
+      processRecoveryUrl(event.url).then((isValid) => {
+        if (!cancelled) {
+          setHasValidRecoverySession(isValid);
+          setVerifyingSession(false);
         }
       });
     });
@@ -96,7 +92,7 @@ export default function ResetPasswordScreen() {
       cancelled = true;
       subscription.remove();
     };
-  }, [session]);
+  }, []);
 
   const submitPasswordReset = async () => {
     if (!newPassword || newPassword.length < 6) {

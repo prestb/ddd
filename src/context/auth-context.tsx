@@ -136,7 +136,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       }
     },
     updatePassword: async (password, language = 'en') => {
-      if (!supabase) return { error: t(language, 'authGenericError') };
+      if (!supabase) return { error: t(language, 'authPasswordUpdateFailed') };
       if (!password || password.length < 6) {
         return { error: t(language, 'authWeakPassword') };
       }
@@ -147,12 +147,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
         });
 
         if (error) {
-          return { error: mapAuthError(error, 'reset', language) };
+          return { error: t(language, 'authPasswordUpdateFailed') };
         }
 
         return {};
-      } catch (err: any) {
-        return { error: mapAuthError(err, 'reset', language) };
+      } catch {
+        return { error: t(language, 'authPasswordUpdateFailed') };
       }
     },
     signOut: async () => {
