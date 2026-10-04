@@ -1,5 +1,6 @@
 import { createContext, PropsWithChildren, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
 
 import { type Devotion } from '@/data/devotions';
 import { supabase } from '@/lib/supabase';
@@ -53,22 +54,27 @@ export function ContentProvider({ children }: PropsWithChildren) {
     isCloudLoadedRef.current = false;
   }, [language, reloadToken, session]);
 
-  // Network Event Listener
+  // Native NetInfo Connectivity Listener
   useEffect(() => {
-    const handleOnline = () => setNetworkStatus('online');
-    const handleOffline = () => setNetworkStatus('offline');
-
-    if (typeof globalThis.addEventListener === 'function') {
-      globalThis.addEventListener('online', handleOnline);
-      globalThis.addEventListener('offline', handleOffline);
-    }
-
-    return () => {
-      if (typeof globalThis.removeEventListener === 'function') {
-        globalThis.removeEventListener('online', handleOnline);
-        globalThis.removeEventListener('offline', handleOffline);
+    NetInfo.fetch().then((state) => {
+      if (state.isConnected === true) {
+        setNetworkStatus('online');
+      } else if (state.isConnected === false) {
+        setNetworkStatus('offline');
       }
-    };
+    });
+
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      if (state.isConnected === true) {
+        setNetworkStatus('online');
+      } else if (state.isConnected === false) {
+        setNetworkStatus('offline');
+      } else {
+        setNetworkStatus('unknown');
+      }
+    });
+
+    return unsubscribe;
   }, []);
 
   // 1. Instant Cache Hydration on Mount, Language Switch, or Account Session Change
@@ -247,11 +253,12 @@ export function ContentProvider({ children }: PropsWithChildren) {
         if (!cancelled) {
           const isOfflineError = Boolean(
             rpcError?.message?.toLowerCase().includes('network') ||
-            rpcError?.message?.toLowerCase().includes('fetch') ||
-            (typeof navigator !== 'undefined' && navigator.onLine === false)
+            rpcError?.message?.toLowerCase().includes('fetch')
           );
 
-          setNetworkStatus(isOfflineError ? 'offline' : 'online');
+          if (isOfflineError) {
+            setNetworkStatus('offline');
+          }
 
           setDevotions((prev) => {
             if (prev.length > 0) {
@@ -274,11 +281,12 @@ export function ContentProvider({ children }: PropsWithChildren) {
           const isOfflineError = Boolean(
             err instanceof TypeError ||
             err?.message?.toLowerCase().includes('network') ||
-            err?.message?.toLowerCase().includes('fetch') ||
-            (typeof navigator !== 'undefined' && navigator.onLine === false)
+            err?.message?.toLowerCase().includes('fetch')
           );
 
-          setNetworkStatus(isOfflineError ? 'offline' : 'online');
+          if (isOfflineError) {
+            setNetworkStatus('offline');
+          }
 
           setDevotions((prev) => {
             if (prev.length > 0) {

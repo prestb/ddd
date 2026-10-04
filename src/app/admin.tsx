@@ -181,56 +181,29 @@ export default function AdminScreen() {
     try {
       const { data, error } = await supabase.functions.invoke('admin-users');
 
-      if (!error && data?.success && Array.isArray(data?.users) && data.users.length > 0) {
+      if (!error && data?.success && Array.isArray(data?.users)) {
         setUsersList(data.users);
+        setUsersError(null);
       } else {
-        // Fallback: Query profiles table directly
-        const { data: profiles, error: profileErr } = await supabase
-          .from('profiles')
-          .select('id, role, created_at, updated_at')
-          .order('created_at', { ascending: false });
-
-        if (profileErr) {
-          let errorMsg = error?.message || data?.message || profileErr.message || 'Could not retrieve user accounts.';
-          if (error && 'context' in error && error.context?.json) {
+        let errorMsg = error?.message || data?.message || 'User accounts could not be loaded. Please try again.';
+        if (error && 'context' in error && typeof error.context === 'object' && error.context) {
+          if ('json' in error.context && typeof error.context.json === 'function') {
             try {
               const details = await error.context.json();
               errorMsg = details?.message ?? details?.error ?? errorMsg;
             } catch { /* keep SDK error */ }
           }
-          setUsersError(errorMsg);
-          setUsersList([]);
-        } else {
-          setUsersList((profiles ?? []).map((p) => ({
-            id: p.id,
-            email: p.id === session?.user?.id ? (session?.user?.email ?? null) : null,
-            role: p.role ?? 'reader',
-            created_at: p.created_at,
-          })));
         }
+        setUsersList([]);
+        setUsersError(errorMsg);
       }
     } catch (err: any) {
-      // Fallback: Query profiles table directly
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id, role, created_at, updated_at')
-        .order('created_at', { ascending: false });
-
-      if (profiles && profiles.length > 0) {
-        setUsersList(profiles.map((p) => ({
-          id: p.id,
-          email: p.id === session?.user?.id ? (session?.user?.email ?? null) : null,
-          role: p.role ?? 'reader',
-          created_at: p.created_at,
-        })));
-      } else {
-        setUsersError(err instanceof Error ? err.message : 'Could not retrieve user accounts.');
-        setUsersList([]);
-      }
+      setUsersList([]);
+      setUsersError(err instanceof Error ? err.message : 'User accounts could not be loaded. Please try again.');
     } finally {
       setLoadingUsers(false);
     }
-  }, [session]);
+  }, []);
 
   const loadFinancials = useCallback(async (ledger: FinanceLedger = financeLedger, page = financePage) => {
     if (!supabase) return;
