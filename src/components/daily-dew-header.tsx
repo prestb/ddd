@@ -102,6 +102,17 @@ export default function DailyDewHeader() {
           </Text>
           <Text style={[styles.aboutText, isDark && styles.darkMenuBody]}>A quiet place for Scripture, meditation, prayer, and reflection.</Text>
 
+          {session ? (
+            <Pressable
+              onPress={() => navigateTo('/profile')}
+              style={styles.menuItem}
+              accessibilityRole="button"
+              accessibilityLabel={t(language, 'profileHeading')}>
+              <AppIcon name="person.crop.circle" size={18} tintColor={iconTintColor} />
+              <Text style={[styles.menuItemText, isDark && styles.darkMenuText]}>{t(language, 'profileHeading')}</Text>
+            </Pressable>
+          ) : null}
+
           <Pressable onPress={() => navigateTo('/membership')} style={styles.menuItem}>
             <AppIcon name="sparkles" size={18} tintColor={DewDesign.colors.terracotta} />
             <Text style={[styles.menuItemText, isDark && styles.darkMenuText]}>{t(language, 'membershipAndBalance')}</Text>
