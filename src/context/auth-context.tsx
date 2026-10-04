@@ -13,6 +13,7 @@ type AuthContextValue = {
   signIn: (email: string, password: string, language?: AppLanguage) => Promise<{ error?: string; needsConfirmation?: boolean }>;
   signUp: (email: string, password: string, language?: AppLanguage) => Promise<{ error?: string; needsConfirmation?: boolean }>;
   resetPassword: (email: string, language?: AppLanguage) => Promise<{ error?: string }>;
+  updatePassword: (password: string, language?: AppLanguage) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
 };
 
@@ -123,6 +124,26 @@ export function AuthProvider({ children }: PropsWithChildren) {
       try {
         const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
           redirectTo: REDIRECT_RECOVERY_URL,
+        });
+
+        if (error) {
+          return { error: mapAuthError(error, 'reset', language) };
+        }
+
+        return {};
+      } catch (err: any) {
+        return { error: mapAuthError(err, 'reset', language) };
+      }
+    },
+    updatePassword: async (password, language = 'en') => {
+      if (!supabase) return { error: t(language, 'authGenericError') };
+      if (!password || password.length < 6) {
+        return { error: t(language, 'authWeakPassword') };
+      }
+
+      try {
+        const { error } = await supabase.auth.updateUser({
+          password,
         });
 
         if (error) {
