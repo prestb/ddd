@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import AppIcon from '@/components/app-icon';
+import AppFeedback, { FeedbackType } from '@/components/app-feedback';
 import { useEffect, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -21,7 +22,7 @@ export default function AuthScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
-  const [message, setMessage] = useState('');
+  const [feedback, setFeedback] = useState<{ type: FeedbackType; title: string; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -38,20 +39,47 @@ export default function AuthScreen() {
 
   const submit = async () => {
     if (!email.trim() || password.length < 6) {
-      setMessage(t(language, 'invalidCredentials'));
+      setFeedback({
+        type: 'warning',
+        title: t(language, 'authFeedbackCheckDetailsTitle'),
+        message: t(language, 'invalidCredentials'),
+      });
       return;
     }
     if (mode === 'signup' && password !== confirmPassword) {
-      setMessage(t(language, 'passwordsDoNotMatch'));
+      setFeedback({
+        type: 'warning',
+        title: t(language, 'authFeedbackCheckDetailsTitle'),
+        message: t(language, 'passwordsDoNotMatch'),
+      });
       return;
     }
     setBusy(true);
-    setMessage('');
+    setFeedback(null);
     const result = mode === 'signin' ? await signIn(email, password, language) : await signUp(email, password, language);
     setBusy(false);
-    if (result.error) setMessage(result.error);
-    else if (result.needsConfirmation) setMessage(t(language, 'checkEmail'));
-    else { setPassword(''); setMessage(t(language, 'signedIn')); }
+
+    if (result.error) {
+      setFeedback({
+        type: 'error',
+        title: mode === 'signin' ? t(language, 'authFeedbackSignInFailed') : t(language, 'authFeedbackSignUpFailed'),
+        message: result.error,
+      });
+    } else if (result.needsConfirmation) {
+      setFeedback({
+        type: 'info',
+        title: t(language, 'authFeedbackCheckEmailTitle'),
+        message: t(language, 'checkEmail'),
+      });
+    } else {
+      setPassword('');
+      setConfirmPassword('');
+      setFeedback({
+        type: 'success',
+        title: t(language, 'authFeedbackSignedInTitle'),
+        message: t(language, 'signedIn'),
+      });
+    }
   };
 
   return (
@@ -131,12 +159,19 @@ export default function AuthScreen() {
                 </Text>
               </Pressable>
               <Pressable
-                onPress={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setMessage(''); }}
+                onPress={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setFeedback(null); }}
                 accessibilityRole="button"
                 style={styles.modeButton}>
                 <Text style={styles.modeText}>{mode === 'signin' ? t(language, 'newHere') : t(language, 'alreadyAccount')}</Text>
               </Pressable>
-              {!!message && <Text style={styles.message}>{message}</Text>}
+              {feedback ? (
+                <AppFeedback
+                  type={feedback.type}
+                  title={feedback.title}
+                  message={feedback.message}
+                  isDark={isDark}
+                />
+              ) : null}
             </View>
           )}
 
