@@ -14,6 +14,7 @@ type AuthContextValue = {
   signUp: (email: string, password: string, language?: AppLanguage) => Promise<{ error?: string; needsConfirmation?: boolean }>;
   resetPassword: (email: string, language?: AppLanguage) => Promise<{ error?: string }>;
   updatePassword: (password: string, language?: AppLanguage) => Promise<{ error?: string }>;
+  changePassword: (currentPassword: string, newPassword: string, language?: AppLanguage) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
 };
 
@@ -147,6 +148,44 @@ export function AuthProvider({ children }: PropsWithChildren) {
         });
 
         if (error) {
+          return { error: t(language, 'authPasswordUpdateFailed') };
+        }
+
+        return {};
+      } catch {
+        return { error: t(language, 'authPasswordUpdateFailed') };
+      }
+    },
+    changePassword: async (currentPassword: string, newPassword: string, language: AppLanguage = 'en') => {
+      if (!supabase) return { error: t(language, 'authPasswordUpdateFailed') };
+      if (!session?.user?.email) {
+        return { error: t(language, 'authGenericError') };
+      }
+
+      const trimmedCurrent = currentPassword;
+      const trimmedNew = newPassword;
+
+      if (!trimmedCurrent || !trimmedNew || trimmedNew.length < 6) {
+        return { error: t(language, 'authWeakPassword') };
+      }
+
+      try {
+        // 1. Verify current credentials against session email
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: session.user.email,
+          password: trimmedCurrent,
+        });
+
+        if (signInError) {
+          return { error: t(language, 'authCurrentPasswordIncorrect') };
+        }
+
+        // 2. Update password after successful verification
+        const { error: updateError } = await supabase.auth.updateUser({
+          password: trimmedNew,
+        });
+
+        if (updateError) {
           return { error: t(language, 'authPasswordUpdateFailed') };
         }
 

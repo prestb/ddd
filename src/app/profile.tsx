@@ -201,6 +201,27 @@ export default function ProfileScreen() {
                 </View>
               </View>
 
+              {/* Security & Password Section */}
+              <View style={[styles.card, isDark && styles.darkCard]}>
+                <Text style={[styles.cardLabel, isDark && styles.darkLabel, { marginBottom: 12 }]}>
+                  {t(language, 'securitySectionTitle')}
+                </Text>
+
+                <Pressable
+                  onPress={() => router.push('/change-password' as any)}
+                  style={styles.securityRow}
+                  accessibilityRole="button"
+                  accessibilityLabel={t(language, 'changePasswordBtn')}>
+                  <View style={styles.securityIconBox}>
+                    <AppIcon name="lock" size={16} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
+                  </View>
+                  <Text style={[styles.securityRowTitle, isDark && styles.darkInk]}>
+                    {t(language, 'changePasswordBtn')}
+                  </Text>
+                  <AppIcon name="chevron.right" size={16} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />
+                </Pressable>
+              </View>
+
               {feedback ? (
                 <AppFeedback
                   type={feedback.type}
@@ -247,4 +268,7 @@ const styles = StyleSheet.create({
   infoValue: { fontSize: 13, fontWeight: '800', color: DewDesign.colors.ink, flex: 1, textAlign: 'right', marginLeft: 12 },
   rolePill: { backgroundColor: DewDesign.colors.forestSoft, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
   rolePillText: { color: DewDesign.colors.forest, fontSize: 11, fontWeight: '900' },
+  securityRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
+  securityIconBox: { width: 34, height: 34, borderRadius: 10, backgroundColor: DewDesign.colors.forestSoft, alignItems: 'center', justifyContent: 'center' },
+  securityRowTitle: { flex: 1, fontSize: 13, fontWeight: '800', color: DewDesign.colors.ink },
 });
