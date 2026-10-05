@@ -6,6 +6,7 @@ export type Devotion = {
   weekday: string;
   title: string;
   scripture: string;
+  fullScripture?: string;
   preview: string;
   meditation: string;
   furtherStudies: string[];
@@ -40,5 +41,5 @@ export function getLocalizedDevotion(index: number, language: SupportedLanguage)
 }
 
 export function getLocalizedDevotions(language: SupportedLanguage): Devotion[] {
-  return DAILY_DEVOTIONS.map((d, index) => localizeDevotion(d, index, language)).filter(Boolean) as Devotion[];
+  return DAILY_DEVOTIONS.map((d: Devotion, index: number) => localizeDevotion(d, index, language)).filter(Boolean) as Devotion[];
 }
