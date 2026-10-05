@@ -55,6 +55,7 @@ export function extractScriptureReference(rawScripture: string): string {
 export async function fetchScripturePassage(
   reference: string,
   preferredTranslation: TranslationCode = 'NIV',
+  language: 'en' | 'fr' = 'en',
 ): Promise<ScripturePassage> {
   const cleanRef = reference.trim();
   const known = SAMPLE_PASSAGES[cleanRef];
@@ -84,13 +85,17 @@ export async function fetchScripturePassage(
       }
     }
   } catch {
-    // Ignore fetch error and return default text fallback
+    // Ignore fetch error and return offline fallback message
   }
+
+  const offlineMsg = language === 'fr'
+    ? 'Impossible de charger le passage. Veuillez vérifier votre connexion Internet et réessayer.'
+    : 'Unable to load passage. Please check your internet connection and try again.';
 
   return {
     reference: cleanRef,
     translation: preferredTranslation,
     translationName: getTranslationName(preferredTranslation),
-    text: `"${cleanRef}" — Let the word of Christ dwell in you richly in all wisdom, teaching and admonishing one another in psalms and hymns and spiritual songs. (Colossians 3:16)`,
+    text: offlineMsg,
   };
 }

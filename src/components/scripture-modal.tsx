@@ -21,11 +21,11 @@ export default function ScriptureModal({ visible, reference, language, isDark, o
   useEffect(() => {
     if (visible && reference) {
       setLoading(true);
-      fetchScripturePassage(reference, translation)
+      fetchScripturePassage(reference, translation, language)
         .then(setPassage)
         .finally(() => setLoading(false));
     }
-  }, [reference, translation, visible]);
+  }, [language, reference, translation, visible]);
 
   if (!visible) return null;
 
