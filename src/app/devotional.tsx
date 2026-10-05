@@ -348,7 +348,7 @@ const styles = StyleSheet.create({
   scripture: { color: DewDesign.colors.terracotta, flexShrink: 1, fontFamily: 'serif', fontSize: 15, fontWeight: '700', lineHeight: 24 },
   darkScripture: { color: '#E7B38F' },
   meditationBody: { gap: 18, paddingHorizontal: 2, marginVertical: 14 },
-  body: { color: DewDesign.colors.body, fontFamily: 'serif', fontSize: 17, lineHeight: 29 },
+  body: { color: DewDesign.colors.body, fontFamily: 'serif', fontSize: 17, lineHeight: 29, textAlign: 'justify' },
   darkBody: { color: DewDesign.colors.darkBody },
   wisdomCard: { backgroundColor: DewDesign.colors.forestSoft, borderLeftWidth: 4, borderLeftColor: DewDesign.colors.forest, padding: 17, marginTop: 15, marginBottom: 20 },
   darkWisdomCard: { backgroundColor: DewDesign.colors.darkSurfaceMuted },
