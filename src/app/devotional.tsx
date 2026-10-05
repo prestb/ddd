@@ -1,6 +1,6 @@
 import SymbolView from '@/components/app-icon';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -14,7 +14,7 @@ import ScriptureModal from '@/components/scripture-modal';
 import AudioPlayerDock from '@/components/audio-player-dock';
 import ShareCardGenerator from '@/components/share-card-generator';
 import { t } from '@/lib/i18n';
-import { extractScriptureReference } from '@/lib/bible';
+import { extractScriptureReference, fetchScripturePassage } from '@/lib/bible';
 
 export default function DevotionalScreen() {
   const params = useLocalSearchParams<{ day?: string }>();
@@ -27,6 +27,26 @@ export default function DevotionalScreen() {
   const [scriptureModalVisible, setScriptureModalVisible] = useState(false);
   const [selectedScriptureRef, setSelectedScriptureRef] = useState<string | null>(null);
   const [shareCardVisible, setShareCardVisible] = useState(false);
+  const [fullScriptureText, setFullScriptureText] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!devotion || !devotion.scripture) {
+      setFullScriptureText(null);
+      return;
+    }
+    let active = true;
+    const cleanRef = extractScriptureReference(devotion.scripture);
+    if (cleanRef) {
+      fetchScripturePassage(cleanRef, language === 'fr' ? 'LSG' : 'NIV', language)
+        .then((passage) => {
+          if (active && passage && passage.text && !passage.text.includes('Unable to load') && !passage.text.includes('Impossible de charger')) {
+            setFullScriptureText(`"${passage.text}" – ${passage.reference} (${passage.translation})`);
+          }
+        })
+        .catch(() => undefined);
+    }
+    return () => { active = false; };
+  }, [devotion, language]);
 
   const { hydrated, completedDays, reflections, prayers, bookmarks, setReflection, setPrayer, toggleCompleted, toggleBookmark } = useDevotional();
   const isComplete = completedDays.includes(index);
@@ -162,7 +182,9 @@ export default function DevotionalScreen() {
               <SymbolView name="book.closed" size={15} tintColor={DewDesign.colors.terracotta} />
               <Text style={styles.scriptureLabel}>{t(language, 'scripture')}</Text>
             </View>
-            <Text style={[styles.scripture, isDark && styles.darkScripture]}>{devotion.scripture}</Text>
+            <Text style={[styles.scripture, isDark && styles.darkScripture]}>
+              {fullScriptureText || devotion.scripture}
+            </Text>
           </View>
 
           {/* Floating Audio Player Dock */}
