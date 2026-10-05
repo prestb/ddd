@@ -164,7 +164,7 @@ export default function DevotionalScreen() {
               <Text style={styles.scriptureLabel}>{t(language, 'scripture')}</Text>
             </View>
             <Text style={[styles.scripture, isDark && styles.darkScripture]}>
-              {devotion.fullScripture || devotion.scripture}
+              {devotion.scriptureText || devotion.scripture}
             </Text>
           </View>
 

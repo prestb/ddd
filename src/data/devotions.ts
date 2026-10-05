@@ -6,7 +6,7 @@ export type Devotion = {
   weekday: string;
   title: string;
   scripture: string;
-  fullScripture?: string;
+  scriptureText?: string;
   preview: string;
   meditation: string;
   furtherStudies: string[];

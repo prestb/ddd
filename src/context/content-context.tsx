@@ -249,7 +249,7 @@ export function ContentProvider({ children }: PropsWithChildren) {
             weekday: row.weekday,
             title: row.title,
             scripture: row.scripture_reference,
-            fullScripture: row.full_scripture ?? row.scripture_reference ?? '',
+            scriptureText: row.scripture_text ?? '',
             preview: row.meditation ? row.meditation.slice(0, 220) : '',
             meditation: row.meditation ?? '',
             furtherStudies: Array.isArray(row.further_studies) ? row.further_studies : [],
