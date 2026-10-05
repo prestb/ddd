@@ -1,6 +1,8 @@
 -- UX-15 FIX: Expose scripture_text column in get_published_edition_devotions RPC
 -- Exposes public.devotions.scripture_text to client applications alongside scripture_reference.
 
+drop function if exists public.get_published_edition_devotions(text);
+
 create or replace function public.get_published_edition_devotions(
   p_language text default 'en'
 )
