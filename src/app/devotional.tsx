@@ -14,6 +14,7 @@ import ScriptureModal from '@/components/scripture-modal';
 import AudioPlayerDock from '@/components/audio-player-dock';
 import ShareCardGenerator from '@/components/share-card-generator';
 import { t } from '@/lib/i18n';
+import { extractScriptureReference } from '@/lib/bible';
 
 export default function DevotionalScreen() {
   const params = useLocalSearchParams<{ day?: string }>();
@@ -24,6 +25,7 @@ export default function DevotionalScreen() {
   const devotion = localizeDevotion(devotions[index], index, language);
 
   const [scriptureModalVisible, setScriptureModalVisible] = useState(false);
+  const [selectedScriptureRef, setSelectedScriptureRef] = useState<string | null>(null);
   const [shareCardVisible, setShareCardVisible] = useState(false);
 
   const { hydrated, completedDays, reflections, prayers, bookmarks, setReflection, setPrayer, toggleCompleted, toggleBookmark } = useDevotional();
@@ -36,6 +38,7 @@ export default function DevotionalScreen() {
   const hasNext = index < devotions.length - 1;
 
   const goToDay = (nextIndex: number) => {
+    setSelectedScriptureRef(null);
     router.replace({ pathname: '/devotional', params: { day: String(nextIndex) } });
   };
 
@@ -69,7 +72,8 @@ export default function DevotionalScreen() {
     );
   }
 
-  const meditationParagraphs = devotion.meditation.split(/\n\s*\n|\n(?=[A-Z][^a-z]{0,2}\s)/).map((paragraph) => paragraph.trim()).filter(Boolean);
+  const cleanLeadReference = extractScriptureReference(devotion.scripture);
+  const meditationParagraphs = devotion.meditation.split(/\n\s*\n/).map((paragraph) => paragraph.trim()).filter(Boolean);
 
   const shareMoment = async () => {
     const appDownloadLink = process.env.EXPO_PUBLIC_APP_DOWNLOAD_URL ?? 'Download link coming soon';
@@ -153,7 +157,14 @@ export default function DevotionalScreen() {
           <Text style={[styles.title, isDark && styles.darkInk, { fontSize: 33 * fontScale, lineHeight: 40 * fontScale }]}>{devotion.title}</Text>
 
           {/* Interactive Scripture Card */}
-          <Pressable onPress={() => setScriptureModalVisible(true)} style={[styles.scriptureCard, isDark && styles.darkScriptureCard]} accessibilityRole="button" accessibilityLabel={t(language, 'scriptureCard')}>
+          <Pressable
+            onPress={() => {
+              setSelectedScriptureRef(cleanLeadReference);
+              setScriptureModalVisible(true);
+            }}
+            style={[styles.scriptureCard, isDark && styles.darkScriptureCard]}
+            accessibilityRole="button"
+            accessibilityLabel={t(language, 'scriptureCard')}>
             <View style={styles.scriptureHeading}>
               <SymbolView name="book.closed" size={15} tintColor={DewDesign.colors.terracotta} />
               <Text style={styles.scriptureLabel}>{t(language, 'scripture')}</Text>
@@ -186,7 +197,16 @@ export default function DevotionalScreen() {
           <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{t(language, 'furtherStudies')}</Text>
           <View style={styles.studyRow}>
             {devotion.furtherStudies.map((study) => (
-              <Pressable key={study} onPress={() => setScriptureModalVisible(true)} style={styles.studyPill} accessibilityRole="button" accessibilityLabel={study}>
+              <Pressable
+                key={study}
+                onPress={() => {
+                  const cleanStudyRef = extractScriptureReference(study);
+                  setSelectedScriptureRef(cleanStudyRef || study);
+                  setScriptureModalVisible(true);
+                }}
+                style={styles.studyPill}
+                accessibilityRole="button"
+                accessibilityLabel={study}>
                 <Text style={styles.studyText}>{study}</Text>
               </Pressable>
             ))}
@@ -262,10 +282,13 @@ export default function DevotionalScreen() {
 
         <ScriptureModal
           visible={scriptureModalVisible}
-          reference={devotion.scripture}
+          reference={selectedScriptureRef ?? cleanLeadReference}
           language={language}
           isDark={isDark}
-          onClose={() => setScriptureModalVisible(false)}
+          onClose={() => {
+            setScriptureModalVisible(false);
+            setSelectedScriptureRef(null);
+          }}
         />
 
         <ShareCardGenerator

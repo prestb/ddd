@@ -26,6 +26,32 @@ export function getTranslationName(code: TranslationCode): string {
   }
 }
 
+export function extractScriptureReference(rawScripture: string): string {
+  if (!rawScripture || !rawScripture.trim()) return '';
+  const str = rawScripture.trim();
+
+  // Match book chapter:verse pattern (e.g. Genesis 1:28, 1 Corinthians 14:40, Deuteronomy 28:1-13)
+  const refMatch = str.match(/([1-3]?\s?[A-Za-z]+)\s+(\d+:\d+(?:\s*[\u2013\u2014-]\s*\d+)?)/);
+  if (refMatch) {
+    return `${refMatch[1].trim()} ${refMatch[2].replace(/[\u2013\u2014]/g, '-').replace(/\s+/g, '')}`;
+  }
+
+  // Fallback: If no chapter:verse colon exists (e.g. Psalm 126 or single verse ref), clean quote dashes
+  if (str.includes('–')) {
+    const parts = str.split('–');
+    const lastPart = parts[parts.length - 1].trim().replace(/\s+(KJV|NIV|ESV|LSG|S21)$/i, '');
+    if (lastPart.length < 35) return lastPart;
+  }
+
+  if (str.includes('-')) {
+    const parts = str.split('-');
+    const lastPart = parts[parts.length - 1].trim().replace(/\s+(KJV|NIV|ESV|LSG|S21)$/i, '');
+    if (lastPart.length < 35) return lastPart;
+  }
+
+  return str.replace(/\s+(KJV|NIV|ESV|LSG|S21)$/i, '').trim();
+}
+
 export async function fetchScripturePassage(
   reference: string,
   preferredTranslation: TranslationCode = 'NIV',
