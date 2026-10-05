@@ -156,22 +156,14 @@ export default function DevotionalScreen() {
           <Text style={styles.date}>{devotion.weekday.toUpperCase()}</Text>
           <Text style={[styles.title, isDark && styles.darkInk, { fontSize: 33 * fontScale, lineHeight: 40 * fontScale }]}>{devotion.title}</Text>
 
-          {/* Interactive Scripture Card */}
-          <Pressable
-            onPress={() => {
-              setSelectedScriptureRef(cleanLeadReference);
-              setScriptureModalVisible(true);
-            }}
-            style={[styles.scriptureCard, isDark && styles.darkScriptureCard]}
-            accessibilityRole="button"
-            accessibilityLabel={t(language, 'scriptureCard')}>
+          {/* Lead Scripture Card */}
+          <View style={[styles.scriptureCard, isDark && styles.darkScriptureCard]}>
             <View style={styles.scriptureHeading}>
               <SymbolView name="book.closed" size={15} tintColor={DewDesign.colors.terracotta} />
               <Text style={styles.scriptureLabel}>{t(language, 'scripture')}</Text>
-              <Text style={styles.tapToReadBadge}>{t(language, 'tapToReadFullPassage')}</Text>
             </View>
             <Text style={[styles.scripture, isDark && styles.darkScripture]}>{devotion.scripture}</Text>
-          </Pressable>
+          </View>
 
           {/* Floating Audio Player Dock */}
           <AudioPlayerDock
