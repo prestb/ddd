@@ -169,6 +169,12 @@ Deno.serve(async (request) => {
     });
   } catch (error) {
     console.error('create-donation failed', error);
-    return json({ error: error instanceof Error ? error.message : 'Donation could not be started.' }, 400);
+    return json(
+      {
+        error: 'DONATION_INITIATION_FAILED',
+        message: 'Donation could not be started right now.',
+      },
+      400
+    );
   }
 });
