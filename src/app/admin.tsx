@@ -659,7 +659,11 @@ export default function AdminScreen() {
       await loadDashboard();
       Alert.alert('PDF uploaded for review', 'The file is stored privately. Run the importer review step before creating or publishing an edition.');
     } catch (errorValue: unknown) {
-      Alert.alert('Could not upload PDF', errorValue instanceof Error ? errorValue.message : 'The selected file could not be read.');
+      const classified = classifyAppError(errorValue, 'admin');
+      Alert.alert(
+        t(language, classified.titleKey),
+        t(language, classified.messageKey)
+      );
     } finally {
       setUploadingPdf(false);
     }
