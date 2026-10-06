@@ -675,16 +675,12 @@ export default function AdminScreen() {
     const { data, error } = await supabase.functions.invoke('parse-devotional-pdf', { body: { importId } });
     setUploadingPdf(false);
     if (error) {
-      let detail = error.message;
-      try {
-        const response = (error as { context?: Response }).context;
-        const body = response ? ((await response.clone().json()) as { error?: string }) : null;
-        if (body?.error) detail = body.error;
-      } catch {
-        // Keep message
-      }
       await loadDashboard();
-      Alert.alert('Could not extract PDF', detail);
+      const classified = classifyAppError(error, 'admin');
+      Alert.alert(
+        t(language, classified.titleKey),
+        t(language, classified.messageKey)
+      );
     } else {
       await loadDashboard();
       Alert.alert('PDF ready for review', `${data?.daysFound ?? 0} daily records extracted. Review is required before importing.`);
