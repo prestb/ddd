@@ -639,7 +639,11 @@ export default function AdminScreen() {
       const path = `${session.user.id}/${Date.now()}-${safeName}`;
       const { error } = await supabase.storage.from('devotional-imports').upload(path, file, { contentType: 'application/pdf', upsert: false });
       if (error) {
-        Alert.alert('Could not upload PDF', error.message);
+        const classified = classifyAppError(error, 'admin');
+        Alert.alert(
+          t(language, classified.titleKey),
+          t(language, classified.messageKey)
+        );
         return;
       }
       const { error: jobError } = await supabase.from('devotional_imports').insert({ owner_id: session.user.id, storage_path: path, source_name: asset.name, status: 'uploaded' });
