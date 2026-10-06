@@ -578,7 +578,11 @@ export default function AdminScreen() {
           if (!supabase) return;
           const { error } = await supabase.from('devotions').delete().eq('id', item.id);
           if (error) {
-            Alert.alert('Could not delete meditation', error.message);
+            const classified = classifyAppError(error, 'admin');
+            Alert.alert(
+              t(language, classified.titleKey),
+              t(language, classified.messageKey)
+            );
             return;
           }
           if (selectedEditionId) await loadDevotions(selectedEditionId);
