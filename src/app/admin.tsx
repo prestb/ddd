@@ -805,7 +805,11 @@ export default function AdminScreen() {
     if (!error) await supabase.from('devotional_imports').update({ status: 'imported', updated_at: new Date().toISOString() }).eq('id', reviewingImport.id);
     setSaving(false);
     if (error) {
-      Alert.alert('Could not import meditations', error.message);
+      const classified = classifyAppError(error, 'admin');
+      Alert.alert(
+        t(language, classified.titleKey),
+        t(language, classified.messageKey)
+      );
       return;
     }
     setReviewingImport(null);
