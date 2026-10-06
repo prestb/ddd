@@ -892,8 +892,13 @@ export default function AdminScreen() {
         text: 'Send now',
         onPress: async () => {
           const { error } = await client.functions.invoke('send-newsletter', { body: { campaignId } });
-          if (error) Alert.alert('Could not send newsletter', error.message);
-          else {
+          if (error) {
+            const classified = classifyAppError(error, 'admin');
+            Alert.alert(
+              t(language, classified.titleKey),
+              t(language, classified.messageKey)
+            );
+          } else {
             Alert.alert('Newsletter sent', 'Delivery has been started.');
             await loadDashboard();
           }
