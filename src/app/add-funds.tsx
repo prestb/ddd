@@ -10,6 +10,7 @@ import { useAuth } from '@/context/auth-context';
 import { useSettings } from '@/context/settings-context';
 import { t } from '@/lib/i18n';
 import { supabase } from '@/lib/supabase';
+import { classifyAppError } from '@/lib/error-utils';
 
 type PaymentStep = 'select' | 'review' | 'pending' | 'success' | 'failed';
 type MobileMoneyProvider = 'mtn' | 'orange';
@@ -54,14 +55,7 @@ export const walletFundingService = {
     });
 
     if (error || !data?.transId) {
-      let message = error?.message || data?.error || 'Could not initiate Mobile Money payment.';
-      if (error && 'context' in error && error.context?.json) {
-        try {
-          const details = await error.context.json();
-          message = details?.error ?? message;
-        } catch { /* Keep SDK error */ }
-      }
-      throw new Error(message);
+      throw error ?? new Error('Payment initiation failed');
     }
 
     return {
@@ -183,9 +177,8 @@ export default function AddFundsScreen() {
       }
     } catch (err) {
       if (isMountedRef.current) {
-        setErrorMessage(
-          err instanceof Error ? err.message : (language === 'fr' ? 'Impossible de démarrer le paiement.' : 'Could not start payment.')
-        );
+        const classified = classifyAppError(err, 'payment');
+        setErrorMessage(t(language, classified.messageKey));
       }
     } finally {
       if (isMountedRef.current) {
