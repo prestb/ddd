@@ -46,12 +46,23 @@ export default function MembershipScreen() {
       try {
         setLoadingAccount(true);
         setAccountError(null);
-        const [{ data: walletData }, { data: subData }] = await Promise.all([
+        const [
+          { data: walletData, error: walletError },
+          { data: subData, error: subError },
+        ] = await Promise.all([
           client.from('wallets').select('balance').eq('user_id', userId).maybeSingle(),
           client.from('subscriptions').select('status, expires_at, auto_renew').eq('user_id', userId).maybeSingle(),
         ]);
 
         if (cancelled) return;
+
+        const loadError = walletError ?? subError;
+        if (loadError) {
+          const classified = classifyAppError(loadError, 'subscription');
+          setAccountError(t(language, classified.messageKey));
+          return;
+        }
+
         if (walletData?.balance !== undefined) setBalance(walletData.balance);
         if (subData) {
           setIsPremium(subData.status === 'active');
@@ -60,9 +71,10 @@ export default function MembershipScreen() {
             setExpiresAt(new Date(subData.expires_at).toLocaleDateString(language === 'fr' ? 'fr-FR' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' }));
           }
         }
-      } catch {
+      } catch (err: unknown) {
         if (!cancelled) {
-          setAccountError(language === 'fr' ? 'Impossible de charger les détails du compte.' : 'Could not load account details.');
+          const classified = classifyAppError(err, 'subscription');
+          setAccountError(t(language, classified.messageKey));
         }
       } finally {
         if (!cancelled) setLoadingAccount(false);
