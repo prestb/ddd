@@ -373,14 +373,14 @@ export default function AdminScreen() {
     setSaving(false);
 
     if (error || !data?.success) {
-      let messageText = error?.message || data?.message || 'Could not create user account.';
-      if (error && 'context' in error && error.context?.json) {
-        try {
-          const details = await error.context.json();
-          messageText = details?.message ?? details?.error ?? messageText;
-        } catch { /* Keep SDK error */ }
-      }
-      Alert.alert('User creation failed', messageText);
+      const classified = classifyAppError(
+        error ?? data?.error ?? data?.message,
+        'admin'
+      );
+      Alert.alert(
+        t(language, classified.titleKey),
+        t(language, classified.messageKey)
+      );
       return;
     }
 
