@@ -166,6 +166,6 @@ Deno.serve(async (request) => {
     });
   } catch (error) {
     console.error('check-donation-status unhandled exception', error);
-    return json({ error: 'INTERNAL_SERVER_ERROR', message: error instanceof Error ? error.message : 'Status check failed.' }, 500);
+    return json({ error: 'INTERNAL_SERVER_ERROR', message: 'Donation status could not be checked right now.' }, 500);
   }
 });
