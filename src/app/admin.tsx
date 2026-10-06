@@ -706,8 +706,16 @@ export default function AdminScreen() {
   const openImportReview = async (file: PdfImport) => {
     if (!supabase) return;
     const { data, error } = await supabase.from('devotional_imports').select('id, source_name, storage_path, status, error_message, created_at, extracted_data').eq('id', file.id).single();
-    if (error || !data) {
-      Alert.alert('Could not open review', error?.message ?? 'The import record could not be found.');
+    if (error) {
+      const classified = classifyAppError(error, 'admin');
+      Alert.alert(
+        t(language, classified.titleKey),
+        t(language, classified.messageKey)
+      );
+      return;
+    }
+    if (!data) {
+      Alert.alert('Could not open review', 'The import record could not be found.');
       return;
     }
     const rawDays = data.extracted_data?.days ?? [];
