@@ -400,7 +400,14 @@ export default function AdminScreen() {
     setSaving(false);
 
     if (error || !data?.success) {
-      Alert.alert('Role update failed', error?.message || data?.message || 'Could not update user role.');
+      const classified = classifyAppError(
+        error ?? data?.error ?? data?.message,
+        'admin'
+      );
+      Alert.alert(
+        t(language, classified.titleKey),
+        t(language, classified.messageKey)
+      );
       return;
     }
 
