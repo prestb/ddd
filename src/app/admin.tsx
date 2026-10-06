@@ -425,7 +425,11 @@ export default function AdminScreen() {
     if (!supabase) return;
     const { error } = await supabase.from('editions').update({ status, updated_at: new Date().toISOString() }).eq('id', edition.id);
     if (error) {
-      Alert.alert('Could not update edition', error.message);
+      const classified = classifyAppError(error, 'admin');
+      Alert.alert(
+        t(language, classified.titleKey),
+        t(language, classified.messageKey)
+      );
       return;
     }
     await loadDashboard();
