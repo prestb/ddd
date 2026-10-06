@@ -7,6 +7,8 @@ import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/context/settings-context';
 import { useAuth } from '@/context/auth-context';
 import { getEditionCacheKey, validateDevotions } from '@/lib/content-validation';
+import { classifyAppError } from '@/lib/error-utils';
+import { t } from '@/lib/i18n';
 
 export type NetworkStatus = 'online' | 'offline' | 'unknown';
 export type ContentSource = 'cloud' | 'cache' | 'none';
@@ -68,19 +70,26 @@ export function ContentProvider({ children }: PropsWithChildren) {
     isCloudLoadedRef.current = false;
   }, [language, reloadToken, session]);
 
-  // Native NetInfo Connectivity Listener
+  // Native NetInfo Connectivity Listener with Automatic Reconnect Retry (offline -> online)
+  const prevNetworkStatusRef = useRef<NetworkStatus>('unknown');
+
   useEffect(() => {
     let active = true;
     let latestEventVersion = 0;
 
     const applyNetworkState = (state: NetInfoState) => {
-      if (state.isConnected === true) {
-        setNetworkStatus('online');
-      } else if (state.isConnected === false) {
-        setNetworkStatus('offline');
-      } else {
-        setNetworkStatus('unknown');
+      const nextStatus: NetworkStatus = state.isConnected === true
+        ? 'online'
+        : state.isConnected === false
+        ? 'offline'
+        : 'unknown';
+
+      // Automatic Retry on Reconnect: Trigger refresh only when transitioning from confirmed offline -> online
+      if (prevNetworkStatusRef.current === 'offline' && nextStatus === 'online') {
+        setReloadToken((prev) => prev + 1);
       }
+      prevNetworkStatusRef.current = nextStatus;
+      setNetworkStatus(nextStatus);
     };
 
     const unsubscribe = NetInfo.addEventListener((state) => {
@@ -287,55 +296,33 @@ export function ContentProvider({ children }: PropsWithChildren) {
 
         // If RPC is unavailable or returns an error, retain valid cached data
         if (!cancelled) {
-          const isOfflineError = Boolean(
-            rpcError?.message?.toLowerCase().includes('network') ||
-            rpcError?.message?.toLowerCase().includes('fetch')
-          );
-
-          if (isOfflineError) {
-            setNetworkStatus('offline');
-          }
+          const syncErrorMsg = networkStatus === 'offline'
+            ? t(language, 'errOfflineMsg')
+            : t(language, classifyAppError(rpcError ?? 'Content unavailable', 'content').messageKey);
 
           setDevotions((prev) => {
             if (prev.length > 0) {
               setSource('cache');
-              setError(
-                rpcError?.message ||
-                (language === 'fr'
-                  ? 'Impossible de synchroniser avec le serveur. Affichage du contenu enregistré.'
-                  : 'Unable to sync with cloud. Showing saved content.')
-              );
             } else {
               setSource('none');
-              setError(rpcError?.message || 'Content unavailable.');
             }
+            setError(syncErrorMsg);
             return prev;
           });
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (!cancelled) {
-          const isOfflineError = Boolean(
-            err instanceof TypeError ||
-            err?.message?.toLowerCase().includes('network') ||
-            err?.message?.toLowerCase().includes('fetch')
-          );
-
-          if (isOfflineError) {
-            setNetworkStatus('offline');
-          }
+          const syncErrorMsg = networkStatus === 'offline'
+            ? t(language, 'errOfflineMsg')
+            : t(language, classifyAppError(err, 'content').messageKey);
 
           setDevotions((prev) => {
             if (prev.length > 0) {
               setSource('cache');
-              setError(
-                language === 'fr'
-                  ? 'Impossible de synchroniser avec le serveur. Affichage du contenu enregistré.'
-                  : 'Unable to sync with cloud. Showing saved content.'
-              );
             } else {
               setSource('none');
-              setError(err instanceof Error ? err.message : 'Content unavailable.');
             }
+            setError(syncErrorMsg);
             return prev;
           });
         }
@@ -347,7 +334,7 @@ export function ContentProvider({ children }: PropsWithChildren) {
     loadPublishedContent();
 
     return () => { cancelled = true; };
-  }, [language, reloadToken, session]);
+  }, [language, networkStatus, reloadToken, session]);
 
   const refresh = useCallback(() => setReloadToken((value) => value + 1), []);
 
