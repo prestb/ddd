@@ -553,7 +553,11 @@ export default function AdminScreen() {
       : await supabase.from('devotions').insert(payload);
     setSaving(false);
     if (result.error) {
-      Alert.alert('Could not save meditation', result.error.message);
+      const classified = classifyAppError(result.error, 'admin');
+      Alert.alert(
+        t(language, classified.titleKey),
+        t(language, classified.messageKey)
+      );
       return;
     }
     setForm({ day: '', weekday: '', title: '', scriptureReference: '', scriptureText: '', meditation: '', furtherStudies: '', wisdom: '', declaration: '' });
