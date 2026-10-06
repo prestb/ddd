@@ -870,7 +870,11 @@ export default function AdminScreen() {
 
     setSaving(false);
     if (error) {
-      Alert.alert('Could not save newsletter', error.message);
+      const classified = classifyAppError(error, 'admin');
+      Alert.alert(
+        t(language, classified.titleKey),
+        t(language, classified.messageKey)
+      );
     } else {
       setNewsletter({ subject: '', body: '' });
       setEditingCampaignId(null);
