@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/auth-context';
 import { useSettings } from '@/context/settings-context';
 import { useContent } from '@/context/content-context';
+import { classifyAppError } from '@/lib/error-utils';
 import { t } from '@/lib/i18n';
 import { supabase } from '@/lib/supabase';
 
@@ -97,15 +98,15 @@ export default function MembershipScreen() {
       });
 
       if (error || !data?.success) {
-        let errorMsg = error?.message || data?.error || 'Purchase failed.';
+        let rawErrorMsg = error?.message || data?.error || 'Purchase failed.';
         if (error && 'context' in error && error.context?.json) {
           try {
             const details = await error.context.json();
-            errorMsg = details?.error ?? details?.message ?? errorMsg;
+            rawErrorMsg = details?.error ?? details?.message ?? rawErrorMsg;
           } catch { /* Keep SDK error */ }
         }
 
-        if (errorMsg.includes('INSUFFICIENT_BALANCE') || data?.code === 'INSUFFICIENT_BALANCE') {
+        if (rawErrorMsg.includes('INSUFFICIENT_BALANCE') || data?.code === 'INSUFFICIENT_BALANCE') {
           Alert.alert(
             t(language, 'membership'),
             language === 'fr'
@@ -117,7 +118,11 @@ export default function MembershipScreen() {
             ]
           );
         } else {
-          setMessage(errorMsg);
+          const classified = classifyAppError(
+            error ?? data?.error ?? data?.message,
+            'subscription'
+          );
+          setMessage(t(language, classified.messageKey));
         }
         return;
       }
@@ -130,8 +135,9 @@ export default function MembershipScreen() {
         setExpiresAt(new Date(data.result.expires_at).toLocaleDateString(language === 'fr' ? 'fr-FR' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' }));
       }
       setMessage(language === 'fr' ? 'Abonnement Daily Dew Premium activé avec succès !' : 'Daily Dew Premium membership activated!');
-    } catch {
-      setMessage(language === 'fr' ? 'Erreur lors de l’achat. Veuillez recharger votre solde.' : 'Purchase failed. Please check your account balance.');
+    } catch (err: unknown) {
+      const classified = classifyAppError(err, 'subscription');
+      setMessage(t(language, classified.messageKey));
     } finally {
       setBusy(false);
     }
