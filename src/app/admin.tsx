@@ -25,6 +25,7 @@ import { adminExtraStyles } from '@/components/admin-extra-styles';
 import AdminBottomNav, { AdminTab } from '@/components/admin-bottom-nav';
 import { useSettings } from '@/context/settings-context';
 import { t } from '@/lib/i18n';
+import { classifyAppError } from '@/lib/error-utils';
 import { getPublishingIssues, validateDevotions } from '@/lib/content-validation';
 import { sanitizeAndRepairExtractedDay } from '@/lib/pdf-parser';
 
@@ -185,25 +186,18 @@ export default function AdminScreen() {
         setUsersList(data.users);
         setUsersError(null);
       } else {
-        let errorMsg = error?.message || data?.message || 'User accounts could not be loaded. Please try again.';
-        if (error && 'context' in error && typeof error.context === 'object' && error.context) {
-          if ('json' in error.context && typeof error.context.json === 'function') {
-            try {
-              const details = await error.context.json();
-              errorMsg = details?.message ?? details?.error ?? errorMsg;
-            } catch { /* keep SDK error */ }
-          }
-        }
+        const classified = classifyAppError(error ?? data?.error ?? data?.message, 'admin');
         setUsersList([]);
-        setUsersError(errorMsg);
+        setUsersError(t(language, classified.messageKey));
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const classified = classifyAppError(err, 'admin');
       setUsersList([]);
-      setUsersError(err instanceof Error ? err.message : 'User accounts could not be loaded. Please try again.');
+      setUsersError(t(language, classified.messageKey));
     } finally {
       setLoadingUsers(false);
     }
-  }, []);
+  }, [language]);
 
   const loadFinancials = useCallback(async (ledger: FinanceLedger = financeLedger, page = financePage) => {
     if (!supabase) return;
