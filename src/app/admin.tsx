@@ -445,7 +445,11 @@ export default function AdminScreen() {
         .order('day_number');
 
       if (validationError) {
-        Alert.alert('Could not validate edition', validationError.message);
+        const classified = classifyAppError(validationError, 'admin');
+        Alert.alert(
+          t(language, classified.titleKey),
+          t(language, classified.messageKey)
+        );
         return;
       }
       const issues = getPublishingIssues(edition, rows ?? []);
