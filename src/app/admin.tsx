@@ -242,7 +242,11 @@ export default function AdminScreen() {
       .order('month', { ascending: false });
 
     if (error) {
-      Alert.alert('Dashboard unavailable', error.message);
+      const classified = classifyAppError(error, 'admin');
+      Alert.alert(
+        t(language, classified.titleKey),
+        t(language, classified.messageKey)
+      );
     } else {
       setEditions(
         (data ?? []).map((edition) => ({
