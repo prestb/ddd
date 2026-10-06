@@ -649,7 +649,11 @@ export default function AdminScreen() {
       const { error: jobError } = await supabase.from('devotional_imports').insert({ owner_id: session.user.id, storage_path: path, source_name: asset.name, status: 'uploaded' });
       if (jobError) {
         await supabase.storage.from('devotional-imports').remove([path]);
-        Alert.alert('Could not create import review', jobError.message);
+        const classified = classifyAppError(jobError, 'admin');
+        Alert.alert(
+          t(language, classified.titleKey),
+          t(language, classified.messageKey)
+        );
         return;
       }
       await loadDashboard();
