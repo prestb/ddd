@@ -693,7 +693,11 @@ export default function AdminScreen() {
     setDeletingPdf(null);
     const { error } = await supabase.functions.invoke('delete-devotional-pdf', { body: { importId: file.id } });
     if (error) {
-      Alert.alert('Could not delete PDF', error.message);
+      const classified = classifyAppError(error, 'admin');
+      Alert.alert(
+        t(language, classified.titleKey),
+        t(language, classified.messageKey)
+      );
       return;
     }
     await loadDashboard();
