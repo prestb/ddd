@@ -524,7 +524,11 @@ export default function AdminScreen() {
     const { data: duplicateRows, error: duplicateError } = editingId ? await duplicateQuery.neq('id', editingId) : await duplicateQuery;
     if (duplicateError) {
       setSaving(false);
-      Alert.alert('Could not validate day', duplicateError.message);
+      const classified = classifyAppError(duplicateError, 'admin');
+      Alert.alert(
+        t(language, classified.titleKey),
+        t(language, classified.messageKey)
+      );
       return;
     }
     if (duplicateRows?.length) {
