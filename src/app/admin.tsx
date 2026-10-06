@@ -498,7 +498,11 @@ export default function AdminScreen() {
       : await supabase.from('editions').insert(payload);
     setSaving(false);
     if (result.error) {
-      Alert.alert('Could not save month', result.error.message);
+      const classified = classifyAppError(result.error, 'admin');
+      Alert.alert(
+        t(language, classified.titleKey),
+        t(language, classified.messageKey)
+      );
       return;
     }
     setShowEditionComposer(false);
