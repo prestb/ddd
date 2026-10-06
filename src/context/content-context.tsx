@@ -70,8 +70,9 @@ export function ContentProvider({ children }: PropsWithChildren) {
     isCloudLoadedRef.current = false;
   }, [language, reloadToken, session]);
 
-  // Native NetInfo Connectivity Listener with Automatic Reconnect Retry (offline -> online)
+  // Native NetInfo Connectivity Listener (Authoritative Source for networkStatus)
   const prevNetworkStatusRef = useRef<NetworkStatus>('unknown');
+  const networkStatusRef = useRef<NetworkStatus>('unknown');
 
   useEffect(() => {
     let active = true;
@@ -89,6 +90,7 @@ export function ContentProvider({ children }: PropsWithChildren) {
         setReloadToken((prev) => prev + 1);
       }
       prevNetworkStatusRef.current = nextStatus;
+      networkStatusRef.current = nextStatus;
       setNetworkStatus(nextStatus);
     };
 
@@ -107,6 +109,7 @@ export function ContentProvider({ children }: PropsWithChildren) {
       })
       .catch(() => {
         if (active && latestEventVersion === fetchVersion) {
+          networkStatusRef.current = 'unknown';
           setNetworkStatus('unknown');
         }
       });
@@ -275,7 +278,6 @@ export function ContentProvider({ children }: PropsWithChildren) {
             setDevotions(checked.valid);
             setEdition(fetchedEdition);
             setSource('cloud');
-            setNetworkStatus('online');
             setError(null);
 
             const hasFullPremiumAccess = checked.valid.every((d) => !d.isLocked);
@@ -296,7 +298,8 @@ export function ContentProvider({ children }: PropsWithChildren) {
 
         // If RPC is unavailable or returns an error, retain valid cached data
         if (!cancelled) {
-          const syncErrorMsg = networkStatus === 'offline'
+          const isConfirmedOffline = networkStatusRef.current === 'offline';
+          const syncErrorMsg = isConfirmedOffline
             ? t(language, 'errOfflineMsg')
             : t(language, classifyAppError(rpcError ?? 'Content unavailable', 'content').messageKey);
 
@@ -312,7 +315,8 @@ export function ContentProvider({ children }: PropsWithChildren) {
         }
       } catch (err: unknown) {
         if (!cancelled) {
-          const syncErrorMsg = networkStatus === 'offline'
+          const isConfirmedOffline = networkStatusRef.current === 'offline';
+          const syncErrorMsg = isConfirmedOffline
             ? t(language, 'errOfflineMsg')
             : t(language, classifyAppError(err, 'content').messageKey);
 
@@ -334,7 +338,7 @@ export function ContentProvider({ children }: PropsWithChildren) {
     loadPublishedContent();
 
     return () => { cancelled = true; };
-  }, [language, networkStatus, reloadToken, session]);
+  }, [language, reloadToken, session]);
 
   const refresh = useCallback(() => setReloadToken((value) => value + 1), []);
 
