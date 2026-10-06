@@ -68,12 +68,20 @@ Deno.serve(async (request) => {
     if (rpcError) {
       console.error('purchase-subscription: purchase_subscription RPC failed', rpcError);
       const isInsufficient = rpcError.message?.includes('INSUFFICIENT_BALANCE');
+      if (isInsufficient) {
+        return json(
+          {
+            error: 'INSUFFICIENT_BALANCE: Your account balance is less than the plan price.',
+            code: 'INSUFFICIENT_BALANCE',
+          },
+          400
+        );
+      }
       return json(
         {
-          error: isInsufficient
-            ? 'INSUFFICIENT_BALANCE: Your account balance is less than the plan price.'
-            : rpcError.message || 'Subscription purchase failed.',
-          code: isInsufficient ? 'INSUFFICIENT_BALANCE' : 'PURCHASE_FAILED',
+          error: 'SUBSCRIPTION_PURCHASE_FAILED',
+          message: 'Subscription purchase failed right now.',
+          code: 'PURCHASE_FAILED',
         },
         400
       );
@@ -88,6 +96,13 @@ Deno.serve(async (request) => {
     });
   } catch (error) {
     console.error('purchase-subscription failed', error);
-    return json({ error: error instanceof Error ? error.message : 'Subscription purchase failed.' }, 400);
+    return json(
+      {
+        error: 'SUBSCRIPTION_PURCHASE_FAILED',
+        message: 'Subscription purchase failed right now.',
+        code: 'PURCHASE_FAILED',
+      },
+      400
+    );
   }
 });
