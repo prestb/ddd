@@ -835,7 +835,11 @@ export default function AdminScreen() {
           if (!supabase) return;
           const { error } = await supabase.from('newsletter_campaigns').delete().eq('id', campaign.id);
           if (error) {
-            Alert.alert('Could not delete draft', error.message);
+            const classified = classifyAppError(error, 'admin');
+            Alert.alert(
+              t(language, classified.titleKey),
+              t(language, classified.messageKey)
+            );
             return;
           }
           if (editingCampaignId === campaign.id) {
