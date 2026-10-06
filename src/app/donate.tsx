@@ -3,6 +3,7 @@ import AppBottomNav from '@/components/app-bottom-nav';
 import DailyDewHeader from '@/components/daily-dew-header';
 import { DewDesign } from '@/constants/design';
 import { useSettings } from '@/context/settings-context';
+import { classifyAppError } from '@/lib/error-utils';
 import { t } from '@/lib/i18n';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
@@ -50,14 +51,14 @@ export default function DonateScreen() {
       });
 
       if (error || !data?.transId) {
-        let message = error?.message ?? t(language, 'donationUnavailable');
-        if (error && 'context' in error && error.context?.json) {
-          try {
-            const details = await error.context.json();
-            message = details?.error ?? message;
-          } catch { /* Keep SDK error */ }
-        }
-        Alert.alert(t(language, 'donate'), message);
+        const classified = classifyAppError(
+          error ?? data?.error ?? data?.message,
+          'donation'
+        );
+        Alert.alert(
+          t(language, 'donate'),
+          t(language, classified.messageKey)
+        );
         return;
       }
 
@@ -66,8 +67,12 @@ export default function DonateScreen() {
         setVerificationToken(data.verificationToken);
       }
       setStep('pending');
-    } catch (err) {
-      Alert.alert(t(language, 'donate'), err instanceof Error ? err.message : t(language, 'donationUnavailable'));
+    } catch (err: unknown) {
+      const classified = classifyAppError(err, 'donation');
+      Alert.alert(
+        t(language, 'donate'),
+        t(language, classified.messageKey)
+      );
     } finally {
       setIsLoading(false);
     }
