@@ -358,7 +358,8 @@ export default function AdminScreen() {
     const { data, error } = await supabase.from('devotions').select('*').eq('edition_id', editionId).order('day_number');
     setLoadingDevotions(false);
     if (error) {
-      setDevotionsError(error.message || 'Could not load meditations for this edition.');
+      const classified = classifyAppError(error, 'admin');
+      setDevotionsError(t(language, classified.messageKey));
       setDevotions([]);
     } else {
       setDevotions((data ?? []) as Devotion[]);
