@@ -209,9 +209,13 @@ export default function AdminScreen() {
     if (!error && data?.success) {
       setFinancials(data);
     } else {
-      Alert.alert('Financials unavailable', error?.message || data?.message || 'Could not load records. Retry.');
+      const classified = classifyAppError(error ?? data?.error ?? data?.message, 'admin');
+      Alert.alert(
+        t(language, classified.titleKey),
+        t(language, classified.messageKey)
+      );
     }
-  }, [financeLedger, financePage]);
+  }, [financeLedger, financePage, language]);
 
   useEffect(() => {
     if (adminTab === 'users') {
