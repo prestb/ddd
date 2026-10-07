@@ -131,10 +131,13 @@ export default function AddFundsScreen() {
 
   useEffect(() => {
     isMountedRef.current = true;
+    if (!session) {
+      router.replace('/auth');
+    }
     return () => {
       isMountedRef.current = false;
     };
-  }, []);
+  }, [session]);
 
   const amount = customAmountText ? (parseInt(customAmountText, 10) || 0) : selectedAmount;
 
@@ -274,6 +277,28 @@ export default function AddFundsScreen() {
       clearInterval(interval);
     };
   }, [step, transId, handleVerifyBackendStatus]);
+
+  if (!session) {
+    return (
+      <View style={[styles.screen, isDark && styles.darkScreen]}>
+        <SafeAreaView style={[styles.safeArea, isDark && styles.darkScreen]}>
+          <DailyDewHeader />
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+            <SymbolView name="lock" size={28} tintColor={DewDesign.colors.forest} />
+            <Text style={{ fontSize: 18, fontWeight: '700', color: isDark ? DewDesign.colors.darkInk : DewDesign.colors.ink, marginTop: 12 }}>
+              {language === 'fr' ? 'Connexion requise' : 'Sign-in required'}
+            </Text>
+            <Text style={{ fontSize: 14, color: isDark ? DewDesign.colors.darkMuted : DewDesign.colors.body, textAlign: 'center', marginTop: 8, marginBottom: 20 }}>
+              {language === 'fr' ? 'Veuillez vous connecter pour recharger votre solde.' : 'Please sign in to add funds to your balance.'}
+            </Text>
+            <Pressable onPress={() => router.push('/auth')} style={[styles.primaryButton, { paddingHorizontal: 24 }]}>
+              <Text style={styles.primaryButtonText}>{language === 'fr' ? 'Se connecter' : 'Sign in'}</Text>
+            </Pressable>
+          </View>
+        </SafeAreaView>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.screen, isDark && styles.darkScreen]}>

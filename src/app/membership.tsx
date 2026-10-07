@@ -126,7 +126,10 @@ export default function MembershipScreen() {
               : 'Your account balance is insufficient for this plan. Please tap Add Funds to top up.',
             [
               { text: t(language, 'cancel'), style: 'cancel' },
-              { text: t(language, 'addFunds'), onPress: () => router.push('/add-funds' as any) },
+              {
+                text: t(language, 'addFunds'),
+                onPress: () => router.push((session ? '/add-funds' : '/auth') as any),
+              },
             ]
           );
         } else {
@@ -280,7 +283,7 @@ export default function MembershipScreen() {
                     <Text style={[styles.balanceValue, isDark && styles.darkInk]}>{`${balance.toLocaleString()} XAF`}</Text>
                   </View>
                   <Pressable
-                    onPress={() => router.push('/add-funds' as any)}
+                    onPress={() => router.push((session ? '/add-funds' : '/auth') as any)}
                     accessibilityRole="button"
                     accessibilityLabel={t(language, 'addFunds')}
                     style={styles.addFundsBtn}>
