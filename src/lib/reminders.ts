@@ -2,6 +2,9 @@ import { Platform } from 'react-native';
 
 export async function scheduleDailyReminder(hour = 7, minute = 0) {
   try {
+    const validHour = Math.min(Math.max(Math.round(hour), 0), 23);
+    const validMinute = Math.min(Math.max(Math.round(minute), 0), 59);
+
     const Notifications = await import('expo-notifications');
     Notifications.setNotificationHandler({
       handleNotification: async () => ({
@@ -11,8 +14,16 @@ export async function scheduleDailyReminder(hour = 7, minute = 0) {
         shouldSetBadge: false,
       }),
     });
-    const permission = await Notifications.requestPermissionsAsync();
-    if (permission.status !== 'granted') return { ok: false, message: 'Notification permission was not granted' };
+
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    let finalStatus = existingStatus;
+    if (existingStatus !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+    if (finalStatus !== 'granted') {
+      return { ok: false, message: 'Notification permission was not granted' };
+    }
 
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('daily-dew', {
@@ -29,12 +40,13 @@ export async function scheduleDailyReminder(hour = 7, minute = 0) {
       },
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DAILY,
-        hour,
-        minute,
+        hour: validHour,
+        minute: validMinute,
         ...(Platform.OS === 'android' ? { channelId: 'daily-dew' } : {}),
       },
     });
-    const formattedHour = `${hour % 12 || 12}:00 ${hour >= 12 ? 'PM' : 'AM'}`;
+
+    const formattedHour = `${validHour % 12 || 12}:${String(validMinute).padStart(2, '0')} ${validHour >= 12 ? 'PM' : 'AM'}`;
     return { ok: true, message: `Every day at ${formattedHour}` };
   } catch {
     return { ok: false, message: 'Reminders need an Android development build' };

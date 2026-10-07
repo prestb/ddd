@@ -18,7 +18,8 @@ export default function SettingsScreen() {
   const isDark = themeMode === 'dark';
   const [reminderMessage, setReminderMessage] = useState<string | null>(null);
 
-  const formatHour = (hour: number) => `${hour % 12 || 12}:00 ${hour >= 12 ? 'PM' : 'AM'}`;
+  const formatHour = (hour: number, minute = 0) =>
+    `${hour % 12 || 12}:${String(minute).padStart(2, '0')} ${hour >= 12 ? 'PM' : 'AM'}`;
 
   const toggleReminder = async () => {
     if (reminderEnabled) {
@@ -43,12 +44,13 @@ export default function SettingsScreen() {
         onChange: async (event, selectedDate) => {
           if (event.type !== 'set' || !selectedDate) return;
           const nextHour = selectedDate.getHours();
+          const nextMinute = selectedDate.getMinutes();
           setReminderHour(nextHour);
           if (reminderEnabled) {
-            const result = await scheduleDailyReminder(nextHour);
-            setReminderMessage(result.message ?? t(language, 'dailyAtTime').replace('{time}', formatHour(nextHour)));
+            const result = await scheduleDailyReminder(nextHour, nextMinute);
+            setReminderMessage(result.message ?? t(language, 'dailyAtTime').replace('{time}', formatHour(nextHour, nextMinute)));
           } else {
-            setReminderMessage(t(language, 'dailyAtTime').replace('{time}', formatHour(nextHour)));
+            setReminderMessage(t(language, 'dailyAtTime').replace('{time}', formatHour(nextHour, nextMinute)));
           }
         },
       });
