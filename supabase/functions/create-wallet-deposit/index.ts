@@ -180,6 +180,12 @@ Deno.serve(async (request) => {
     });
   } catch (error) {
     console.error('create-wallet-deposit failed', error);
-    return json({ error: error instanceof Error ? error.message : 'Wallet deposit could not be initiated.' }, 400);
+    return json(
+      {
+        error: 'WALLET_DEPOSIT_INITIATION_FAILED',
+        message: 'Wallet deposit could not be initiated right now.',
+      },
+      400
+    );
   }
 });
