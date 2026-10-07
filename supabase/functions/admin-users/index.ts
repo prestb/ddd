@@ -132,6 +132,12 @@ Deno.serve(async (request) => {
     });
   } catch (error) {
     console.error('admin-users unhandled exception', error);
-    return json({ error: 'INTERNAL_SERVER_ERROR', message: error instanceof Error ? error.message : 'User listing failed.' }, 500);
+    return json(
+      {
+        error: 'INTERNAL_SERVER_ERROR',
+        message: 'User information could not be retrieved right now.',
+      },
+      500
+    );
   }
 });
