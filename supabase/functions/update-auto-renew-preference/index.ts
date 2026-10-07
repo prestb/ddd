@@ -60,6 +60,12 @@ Deno.serve(async (request) => {
     });
   } catch (error) {
     console.error('update-auto-renew-preference unhandled exception', error);
-    return json({ error: 'INTERNAL_SERVER_ERROR', message: error instanceof Error ? error.message : 'Update failed.' }, 500);
+    return json(
+      {
+        error: 'INTERNAL_SERVER_ERROR',
+        message: 'Could not update auto-renewal preference right now.',
+      },
+      500
+    );
   }
 });
