@@ -111,10 +111,23 @@ export function AuthProvider({ children }: PropsWithChildren) {
     },
     signUp: async (email, password, language = 'en') => {
       if (!supabase) return { error: t(language, 'authGenericError') };
-      const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
-      return error
-        ? { error: mapAuthError(error, 'signup', language) }
-        : { needsConfirmation: !data.session };
+      const cleanEmail = email.trim();
+      const { data, error } = await supabase.auth.signUp({ email: cleanEmail, password });
+      if (error) {
+        return { error: mapAuthError(error, 'signup', language) };
+      }
+
+      if (!data.session) {
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password,
+        });
+        if (signInError) {
+          return { needsConfirmation: true };
+        }
+      }
+
+      return {};
     },
     resetPassword: async (email, language = 'en') => {
       if (!supabase) return { error: t(language, 'authGenericError') };
