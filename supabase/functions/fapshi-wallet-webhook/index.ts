@@ -75,8 +75,14 @@ Deno.serve(async (request) => {
   } catch (error) {
     console.error('fapshi-wallet-webhook failed', error);
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Webhook processing failed.' }),
-      { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } }
+      JSON.stringify({
+        error: 'WALLET_WEBHOOK_PROCESSING_FAILED',
+        message: 'Wallet payment processing could not be completed right now.',
+      }),
+      {
+        status: 400,
+        headers: { ...cors, 'Content-Type': 'application/json' },
+      }
     );
   }
 });
