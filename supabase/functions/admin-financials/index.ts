@@ -115,6 +115,12 @@ Deno.serve(async (request) => {
     });
   } catch (error) {
     console.error('admin-financials unhandled exception', error);
-    return json({ error: 'INTERNAL_SERVER_ERROR', message: error instanceof Error ? error.message : 'Financial fetch failed.' }, 500);
+    return json(
+      {
+        error: 'INTERNAL_SERVER_ERROR',
+        message: 'Financial information could not be retrieved right now.',
+      },
+      500
+    );
   }
 });
