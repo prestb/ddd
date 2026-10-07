@@ -210,6 +210,12 @@ Deno.serve(async (request) => {
     });
   } catch (error) {
     console.error('check-wallet-deposit-status unhandled exception', error);
-    return json({ error: 'INTERNAL_SERVER_ERROR', message: error instanceof Error ? error.message : 'Status check failed.' }, 500);
+    return json(
+      {
+        error: 'INTERNAL_SERVER_ERROR',
+        message: 'Deposit status could not be checked right now.',
+      },
+      500
+    );
   }
 });
