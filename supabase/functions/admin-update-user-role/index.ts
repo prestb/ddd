@@ -64,7 +64,13 @@ Deno.serve(async (request) => {
 
     if (updateError) {
       console.error('admin-update-user-role: Update error', updateError);
-      return json({ error: 'ROLE_UPDATE_FAILED', message: updateError.message }, 500);
+      return json(
+        {
+          error: 'ROLE_UPDATE_FAILED',
+          message: 'Could not update the user role right now.',
+        },
+        500
+      );
     }
 
     // Log action in admin_audit_log
@@ -83,6 +89,12 @@ Deno.serve(async (request) => {
     });
   } catch (error) {
     console.error('admin-update-user-role unhandled exception', error);
-    return json({ error: 'INTERNAL_SERVER_ERROR', message: error instanceof Error ? error.message : 'Role update failed.' }, 500);
+    return json(
+      {
+        error: 'INTERNAL_SERVER_ERROR',
+        message: 'Could not update the user role right now.',
+      },
+      500
+    );
   }
 });
