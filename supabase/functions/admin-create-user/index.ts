@@ -61,7 +61,13 @@ Deno.serve(async (request) => {
 
     if (createUserError || !createdUser?.user) {
       console.error('admin-create-user: Auth creation error', createUserError);
-      return json({ error: 'USER_CREATION_FAILED', message: createUserError?.message || 'Could not create user account.' }, 400);
+      return json(
+        {
+          error: 'USER_CREATION_FAILED',
+          message: 'Could not create the user account right now.',
+        },
+        400
+      );
     }
 
     const newUserId = createdUser.user.id;
@@ -118,6 +124,12 @@ Deno.serve(async (request) => {
     });
   } catch (error) {
     console.error('admin-create-user unhandled exception', error);
-    return json({ error: 'INTERNAL_SERVER_ERROR', message: error instanceof Error ? error.message : 'User creation failed.' }, 500);
+    return json(
+      {
+        error: 'INTERNAL_SERVER_ERROR',
+        message: 'Could not create the user account right now.',
+      },
+      500
+    );
   }
 });
