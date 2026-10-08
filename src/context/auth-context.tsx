@@ -112,7 +112,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     signUp: async (email, password, language = 'en') => {
       if (!supabase) return { error: t(language, 'authGenericError') };
       const cleanEmail = email.trim();
-      const { data, error } = await supabase.auth.signUp({
+      const { error } = await supabase.auth.signUp({
         email: cleanEmail,
         password,
         options: {
@@ -123,17 +123,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         return { error: mapAuthError(error, 'signup', language) };
       }
 
-      if (!data.session) {
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: cleanEmail,
-          password,
-        });
-        if (signInError) {
-          return { needsConfirmation: true };
-        }
-      }
-
-      return {};
+      return { needsConfirmation: true };
     },
     resetPassword: async (email, language = 'en') => {
       if (!supabase) return { error: t(language, 'authGenericError') };

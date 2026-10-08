@@ -170,6 +170,10 @@ export default function AuthScreen() {
         message: result.error,
       });
     } else if (result.needsConfirmation) {
+      setEmail('');
+      setPassword('');
+      setConfirmPassword('');
+      setMode('signin');
       setFeedback({
         type: 'info',
         title: t(language, 'authFeedbackCheckEmailTitle'),
