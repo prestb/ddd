@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { DewDesign } from '@/constants/design';
 import { fetchScripturePassage, getTranslationName, ScripturePassage, TranslationCode } from '@/lib/bible';
+import { t } from '@/lib/i18n';
 
 interface ScriptureModalProps {
   visible: boolean;
@@ -20,11 +21,11 @@ export default function ScriptureModal({ visible, reference, language, isDark, o
   useEffect(() => {
     if (visible && reference) {
       setLoading(true);
-      fetchScripturePassage(reference, translation)
+      fetchScripturePassage(reference, translation, language)
         .then(setPassage)
         .finally(() => setLoading(false));
     }
-  }, [reference, translation, visible]);
+  }, [language, reference, translation, visible]);
 
   if (!visible) return null;
 
@@ -49,7 +50,7 @@ export default function ScriptureModal({ visible, reference, language, isDark, o
               <AppIcon name="book.closed.fill" size={18} tintColor={DewDesign.colors.terracotta} />
               <Text style={[styles.reference, isDark && styles.darkInk]}>{reference}</Text>
             </View>
-            <Pressable onPress={onClose} style={styles.closeBtn} accessibilityLabel="Close scripture modal">
+            <Pressable onPress={onClose} style={styles.closeBtn} accessibilityRole="button" accessibilityLabel={t(language, 'closeScriptureModal')}>
               <AppIcon name="xmark.circle.fill" size={22} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />
             </Pressable>
           </View>

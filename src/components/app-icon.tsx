@@ -10,6 +10,7 @@ const iconMap: Record<string, string> = {
   'bell.fill': 'bell',
   gearshape: 'cog-outline',
   heart: 'heart-outline',
+  'heart.fill': 'heart',
   'person.crop.circle': 'account-outline',
   'rectangle.portrait.and.arrow.right': 'logout',
   'book.closed': 'book-open-page-variant-outline',
@@ -20,7 +21,15 @@ const iconMap: Record<string, string> = {
   'chevron.right': 'chevron-right',
   'arrow.right': 'arrow-right',
   'arrow.down': 'arrow-down',
-  'bookmark': 'bookmark-outline',
+  'arrow.clockwise': 'reload',
+  'clock.fill': 'clock-time-four',
+  'checkmark.circle.fill': 'check-circle',
+  creditcard: 'credit-card-outline',
+  'creditcard.fill': 'credit-card',
+  'square.and.arrow.down': 'file-download-outline',
+  'play.circle.fill': 'play-circle',
+  'wifi.slash': 'wifi-off',
+  bookmark: 'bookmark-outline',
   'bookmark.fill': 'bookmark',
   'pause.fill': 'pause',
   'play.fill': 'play',
@@ -28,7 +37,7 @@ const iconMap: Record<string, string> = {
   'square.and.arrow.up': 'share-variant-outline',
   checkmark: 'check',
   'checkmark.circle': 'check-circle-outline',
-  'magnifyingglass': 'magnify',
+  magnifyingglass: 'magnify',
   'xmark.circle.fill': 'close-circle',
   flame: 'fire',
   'flame.fill': 'fire',
@@ -57,6 +66,8 @@ const iconMap: Record<string, string> = {
   eye: 'eye-outline',
   'arrow.down.doc': 'file-download-outline',
   moon: 'moon-waning-crescent',
+  'eye.slash': 'eye-off-outline',
+  'checkmark.seal.fill': 'check-decagram',
 };
 
 type AppIconProps = {
@@ -66,5 +77,8 @@ type AppIconProps = {
 };
 
 export default function AppIcon({ name, size = 20, tintColor = '#1E2A24' }: AppIconProps) {
+  if (__DEV__ && !iconMap[name]) {
+    console.warn(`[AppIcon] Missing icon mapping for name: "${name}"`);
+  }
   return <MaterialCommunityIcons name={(iconMap[name] ?? 'help-circle-outline') as any} size={size} color={tintColor} />;
 }

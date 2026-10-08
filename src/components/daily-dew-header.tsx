@@ -39,9 +39,9 @@ export default function DailyDewHeader() {
     setTimeout(() => setToast(null), 2000);
   };
 
-  const navigateTo = (path: '/auth' | '/settings' | '/admin') => {
+  const navigateTo = (path: string) => {
     closeMenu();
-    setTimeout(() => router.push(path), 50);
+    setTimeout(() => router.push(path as any), 50);
   };
 
   const openAbout = () => {
@@ -97,26 +97,51 @@ export default function DailyDewHeader() {
       {open === 'account' && (
         <View style={[styles.menu, isDark && styles.darkMenu, DewDesign.shadows.floating]}>
           <Text style={styles.menuEyebrow}>{t(language, 'about')}</Text>
-          <Text style={[styles.menuTitle, isDark && styles.darkMenuText]}>Daily Dew Devotional</Text>
+          <Text style={[styles.menuTitle, isDark && styles.darkMenuText]}>
+            {session?.user.email ? session.user.email : 'Daily Dew Devotional'}
+          </Text>
           <Text style={[styles.aboutText, isDark && styles.darkMenuBody]}>A quiet place for Scripture, meditation, prayer, and reflection.</Text>
-          <Pressable onPress={openAbout} style={styles.menuItem}>
-            <AppIcon name="info.circle" size={18} tintColor={iconTintColor} />
-            <Text style={[styles.menuItemText, isDark && styles.darkMenuText]}>{t(language, 'about')}</Text>
+
+          {session ? (
+            <Pressable
+              onPress={() => navigateTo('/profile')}
+              style={styles.menuItem}
+              accessibilityRole="button"
+              accessibilityLabel={t(language, 'profileHeading')}>
+              <AppIcon name="person.crop.circle" size={18} tintColor={iconTintColor} />
+              <Text style={[styles.menuItemText, isDark && styles.darkMenuText]}>{t(language, 'profileHeading')}</Text>
+            </Pressable>
+          ) : null}
+
+          <Pressable onPress={() => navigateTo('/membership')} style={styles.menuItem}>
+            <AppIcon name="sparkles" size={18} tintColor={DewDesign.colors.terracotta} />
+            <Text style={[styles.menuItemText, isDark && styles.darkMenuText]}>{t(language, 'membershipAndBalance')}</Text>
           </Pressable>
           <Pressable onPress={() => navigateTo('/settings')} style={styles.menuItem}>
             <AppIcon name="gearshape" size={18} tintColor={iconTintColor} />
             <Text style={[styles.menuItemText, isDark && styles.darkMenuText]}>{t(language, 'settings')}</Text>
           </Pressable>
+          <Pressable onPress={openAbout} style={styles.menuItem}>
+            <AppIcon name="info.circle" size={18} tintColor={iconTintColor} />
+            <Text style={[styles.menuItemText, isDark && styles.darkMenuText]}>{t(language, 'about')}</Text>
+          </Pressable>
           <Pressable onPress={openDonation} style={styles.menuItem}>
             <AppIcon name="heart" size={18} tintColor={DewDesign.colors.terracotta} />
             <Text style={[styles.menuItemText, isDark && styles.darkMenuText]}>{t(language, 'donate')}</Text>
           </Pressable>
+
           {canManageMinistry ? (
-            <Pressable onPress={() => navigateTo('/admin')} style={styles.menuItem}>
-              <AppIcon name="rectangle.3.group" size={18} tintColor={iconTintColor} />
-              <Text style={[styles.menuItemText, isDark && styles.darkMenuText]}>{t(language, 'ministryDashboard')}</Text>
-            </Pressable>
+            <View style={styles.adminDividerGroup}>
+              <View style={[styles.menuDivider, isDark && styles.darkMenuDivider]} />
+              <Text style={styles.adminEyebrow}>{language === 'fr' ? 'ESPACE MINISTÈRE' : 'MINISTRY WORKSPACE'}</Text>
+              <Pressable onPress={() => navigateTo('/admin')} style={styles.menuItem}>
+                <AppIcon name="rectangle.3.group" size={18} tintColor={DewDesign.colors.terracotta} />
+                <Text style={[styles.menuItemText, isDark && styles.darkMenuText, { fontWeight: '800' }]}>{t(language, 'ministryDashboard')}</Text>
+              </Pressable>
+            </View>
           ) : null}
+
+          <View style={[styles.menuDivider, isDark && styles.darkMenuDivider]} />
           <Pressable onPress={() => session ? signOut().then(closeMenu) : navigateTo('/auth')} style={styles.menuItem}>
             <AppIcon name={session ? 'rectangle.portrait.and.arrow.right' : 'person.crop.circle'} size={18} tintColor={session ? DewDesign.colors.terracotta : iconTintColor} />
             <Text style={session ? styles.menuItemDanger : [styles.menuItemText, isDark && styles.darkMenuText]}>{session ? t(language, 'logout') : t(language, 'login')}</Text>
@@ -178,6 +203,10 @@ const styles = StyleSheet.create({
   menuItem: { minHeight: 44, borderTopWidth: 1, borderTopColor: DewDesign.colors.surfaceMuted, flexDirection: 'row', alignItems: 'center', gap: 12 },
   menuItemText: { flex: 1, color: DewDesign.colors.forest, fontSize: 13, fontWeight: '800' },
   menuItemDanger: { flex: 1, color: DewDesign.colors.terracotta, fontSize: 13, fontWeight: '800' },
+  adminDividerGroup: { marginTop: 4 },
+  adminEyebrow: { color: DewDesign.colors.terracotta, fontSize: 9, fontWeight: '900', letterSpacing: 1.2, marginTop: 8, marginBottom: 4 },
+  menuDivider: { height: 1, backgroundColor: DewDesign.colors.line, marginVertical: 6 },
+  darkMenuDivider: { backgroundColor: DewDesign.colors.darkLine },
   aboutText: { color: DewDesign.colors.body, fontSize: 12, lineHeight: 17, marginBottom: 8 },
   aboutVersion: { color: DewDesign.colors.muted, fontSize: 10, marginTop: 8 },
 });
