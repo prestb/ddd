@@ -218,12 +218,18 @@ export default function AdminScreen() {
   }, [financeLedger, financePage, language]);
 
   useEffect(() => {
-    if (adminTab === 'users') {
+    if (role && role !== 'admin' && (adminTab === 'users' || adminTab === 'finance')) {
+      setAdminTab('content');
+    }
+  }, [role, adminTab]);
+
+  useEffect(() => {
+    if (adminTab === 'users' && role === 'admin') {
       loadUsers();
-    } else if (adminTab === 'finance') {
+    } else if (adminTab === 'finance' && role === 'admin') {
       loadFinancials(financeLedger, financePage);
     }
-  }, [adminTab, financeLedger, financePage, loadUsers, loadFinancials]);
+  }, [adminTab, financeLedger, financePage, loadUsers, loadFinancials, role]);
 
   const loadDashboard = useCallback(async () => {
     if (!supabase || !session) return;
@@ -1415,7 +1421,7 @@ export default function AdminScreen() {
           )}
         </ScrollView>
 
-        <AdminBottomNav activeTab={adminTab} onChange={setAdminTab} />
+        <AdminBottomNav activeTab={adminTab} onChange={setAdminTab} role={role} />
 
         {/* Transaction Details Modal */}
         <Modal visible={Boolean(selectedTxDetails)} transparent animationType="slide" onRequestClose={() => setSelectedTxDetails(null)}>

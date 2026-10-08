@@ -14,12 +14,28 @@ const items: { key: AdminTab; label: TranslationKey; icon: string }[] = [
   { key: 'finance', label: 'membershipAndBalance', icon: 'creditcard' },
 ];
 
-export default function AdminBottomNav({ activeTab, onChange }: { activeTab: AdminTab; onChange: (tab: AdminTab) => void }) {
+export default function AdminBottomNav({
+  activeTab,
+  onChange,
+  role,
+}: {
+  activeTab: AdminTab;
+  onChange: (tab: AdminTab) => void;
+  role?: string | null;
+}) {
   const { language, themeMode } = useSettings();
   const isDark = themeMode === 'dark';
+
+  const visibleItems = items.filter((item) => {
+    if (item.key === 'users' || item.key === 'finance') {
+      return role === 'admin';
+    }
+    return true;
+  });
+
   return (
     <View style={[styles.bar, isDark ? styles.darkBar : styles.lightBar]}>
-      {items.map((item) => {
+      {visibleItems.map((item) => {
         const active = item.key === activeTab;
         return (
           <Pressable key={item.key} onPress={() => onChange(item.key)} style={[styles.item, active && (isDark ? styles.activeItem : styles.lightActiveItem)]} accessibilityRole="button" accessibilityLabel={t(language, item.label)}>
