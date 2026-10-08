@@ -2,8 +2,9 @@ import { router } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import AppIcon from '@/components/app-icon';
 import AppFeedback, { FeedbackType } from '@/components/app-feedback';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as Linking from 'expo-linking';
 
 import DailyDewHeader from '@/components/daily-dew-header';
 import { useAuth } from '@/context/auth-context';
@@ -24,6 +25,78 @@ export default function AuthScreen() {
   const [mode, setMode] = useState<'signin' | 'signup' | 'recovery'>('signin');
   const [feedback, setFeedback] = useState<{ type: FeedbackType; title: string; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const processedUrlsRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function handleAuthDeepLink(url: string | null): Promise<boolean> {
+      if (!url || !supabase) return false;
+
+      if (processedUrlsRef.current.has(url)) return false;
+      processedUrlsRef.current.add(url);
+
+      try {
+        const hash = url.split('#')[1] ?? '';
+        const hashParams = new URLSearchParams(hash);
+        const accessToken = hashParams.get('access_token');
+        const refreshToken = hashParams.get('refresh_token');
+
+        if (accessToken && refreshToken) {
+          const { data, error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (!error && data.session && !cancelled) {
+            return true;
+          }
+        }
+
+        const parsed = Linking.parse(url);
+        const code = typeof parsed.queryParams?.code === 'string' ? parsed.queryParams.code : null;
+        if (code) {
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+          if (!error && data.session && !cancelled) {
+            return true;
+          }
+        }
+
+        const queryAccessToken = typeof parsed.queryParams?.access_token === 'string' ? parsed.queryParams.access_token : null;
+        const queryRefreshToken = typeof parsed.queryParams?.refresh_token === 'string' ? parsed.queryParams.refresh_token : null;
+        if (queryAccessToken && queryRefreshToken) {
+          const { data, error } = await supabase.auth.setSession({
+            access_token: queryAccessToken,
+            refresh_token: queryRefreshToken,
+          });
+          if (!error && data.session && !cancelled) {
+            return true;
+          }
+        }
+      } catch {
+        // Safely ignore deep link parse exceptions
+      }
+      return false;
+    }
+
+    async function checkInitialUrl() {
+      const initialUrl = await Linking.getInitialURL().catch(() => null);
+      if (initialUrl) {
+        await handleAuthDeepLink(initialUrl);
+      }
+    }
+
+    checkInitialUrl();
+
+    const subscription = Linking.addEventListener('url', (event) => {
+      handleAuthDeepLink(event.url);
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.remove();
+    };
+  }, []);
 
   useEffect(() => {
     if (!session) return;

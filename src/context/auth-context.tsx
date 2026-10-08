@@ -112,7 +112,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
     signUp: async (email, password, language = 'en') => {
       if (!supabase) return { error: t(language, 'authGenericError') };
       const cleanEmail = email.trim();
-      const { data, error } = await supabase.auth.signUp({ email: cleanEmail, password });
+      const { data, error } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password,
+        options: {
+          emailRedirectTo: 'devotionalapp://auth',
+        },
+      });
       if (error) {
         return { error: mapAuthError(error, 'signup', language) };
       }
