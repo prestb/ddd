@@ -36,7 +36,7 @@ export default function SpiritualMilestones({
     },
     {
       id: 'answered_faith',
-      title: language === 'fr' ? 'Dieu Répond' : 'Praise & Answered',
+      title: language === 'fr' ? 'Actions de Grâces' : 'Thanksgiving',
       desc: language === 'fr' ? 'Prière exaucée' : 'Answered prayer recorded',
       unlocked: answeredPrayersCount >= 1,
       icon: 'checkmark.seal.fill',

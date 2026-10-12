@@ -307,7 +307,7 @@ export default function SettingsScreen() {
             accessibilityRole="button"
             accessibilityLabel={t(language, 'aboutPrivacySupport')}>
             <Text style={[styles.noteTitle, isDark && styles.darkInk]}>Daily Dew Devotional</Text>
-            <Text style={styles.noteSubtitle}>A Devotional for the Strange Breeds</Text>
+            <Text style={styles.noteSubtitle}>Our Weapon of Perfection</Text>
             <Text style={[styles.noteText, isDark && styles.darkBody]}>{t(language, 'aboutPrivacySupport')}</Text>
           </Pressable>
         </ScrollView>

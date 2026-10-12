@@ -31,7 +31,7 @@ export default function LegalScreen() {
           <View style={[styles.card, isDark && styles.darkCard]}>
             <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{t(language, 'aboutApp')}</Text>
             <Text style={[styles.body, isDark && styles.darkBody]}>
-              Daily Dew Devotional turns the monthly devotional into an interactive daily rhythm. Read, listen, reflect, pray, save meaningful moments, and continue your journey wherever you are.
+              {t(language, 'aboutText')}
             </Text>
           </View>
 

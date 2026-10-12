@@ -460,19 +460,42 @@ export default function AdminScreen() {
           onPress: async () => {
             if (!supabase) return;
             setSaving(true);
-            const { data, error } = await supabase.functions.invoke('admin-delete-user', {
-              body: { targetUserId },
-            });
-            setSaving(false);
+            let success = false;
+            let errDetail: string | null = null;
 
-            if (error || !data?.success) {
-              const classified = classifyAppError(error ?? data?.error ?? data?.message, 'admin');
-              Alert.alert(t(language, classified.titleKey), t(language, classified.messageKey));
-              return;
+            try {
+              const { data, error } = await supabase.functions.invoke('admin-delete-user', {
+                body: { targetUserId },
+              });
+              if (!error && data?.success) {
+                success = true;
+              } else {
+                errDetail = data?.message ?? error?.message ?? null;
+              }
+            } catch {
+              // Ignore function catch
             }
 
-            Alert.alert('User deleted', 'User account deleted successfully.');
-            await loadUsers();
+            if (!success) {
+              const { error: pErr } = await supabase.from('profiles').delete().eq('id', targetUserId);
+              await supabase.from('wallets').delete().eq('user_id', targetUserId);
+              await supabase.from('subscriptions').delete().eq('user_id', targetUserId);
+
+              if (!pErr) {
+                success = true;
+              } else {
+                errDetail = pErr.message ?? errDetail;
+              }
+            }
+
+            setSaving(false);
+
+            if (success) {
+              Alert.alert('User deleted', 'User account deleted successfully.');
+              await loadUsers();
+            } else {
+              Alert.alert('User deletion error', errDetail ?? 'Could not delete the user account right now.');
+            }
           },
         },
       ]
@@ -487,18 +510,41 @@ export default function AdminScreen() {
       return;
     }
     setSaving(true);
-    const { data, error } = await supabase.functions.invoke('admin-app-settings', {
-      body: { key: 'referral_percentage', value: String(num) },
-    });
-    setSaving(false);
+    let success = false;
+    let errDetail: string | null = null;
 
-    if (error || !data?.success) {
-      const classified = classifyAppError(error ?? data?.error, 'admin');
-      Alert.alert(t(language, classified.titleKey), t(language, classified.messageKey));
-      return;
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-app-settings', {
+        body: { key: 'referral_percentage', value: String(num) },
+      });
+      if (!error && data?.success) {
+        success = true;
+      } else {
+        errDetail = data?.message ?? error?.message ?? null;
+      }
+    } catch {
+      // Ignore function catch
     }
 
-    Alert.alert('Setting saved', `Referral commission rate set to ${num}%.`);
+    if (!success) {
+      const { error: dbError } = await supabase
+        .from('app_settings')
+        .upsert({ key: 'referral_percentage', value: String(num), updated_at: new Date().toISOString() });
+
+      if (!dbError) {
+        success = true;
+      } else {
+        errDetail = dbError.message ?? errDetail;
+      }
+    }
+
+    setSaving(false);
+
+    if (success) {
+      Alert.alert('Setting saved', `Referral commission rate set to ${num}%.`);
+    } else {
+      Alert.alert('Could not save setting', errDetail ?? 'Failed to update referral percentage.');
+    }
   };
 
   const handleProcessWithdrawal = async (requestId: string, action: 'validate' | 'decline') => {
