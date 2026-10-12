@@ -63,6 +63,33 @@ CREATE TRIGGER trg_assign_referral_code
 BEFORE INSERT ON public.profiles
 FOR EACH ROW EXECUTE FUNCTION auto_assign_referral_code();
 
+-- Auto-create profiles and wallets on new user signup
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.profiles (id, email, role, created_at, updated_at)
+  VALUES (NEW.id, NEW.email, 'reader', NOW(), NOW())
+  ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email;
+
+  INSERT INTO public.wallets (user_id, balance, referral_balance)
+  VALUES (NEW.id, 0, 0)
+  ON CONFLICT (user_id) DO NOTHING;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+AFTER INSERT ON auth.users
+FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- Backfill any existing users in auth.users missing from public.profiles and public.wallets
+INSERT INTO public.profiles (id, email, role, created_at, updated_at)
+SELECT id, email, 'reader', NOW(), NOW()
+FROM auth.users
+ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email;
+
 UPDATE public.profiles
 SET referral_code = generate_unique_referral_code()
 WHERE referral_code IS NULL OR referral_code = '';
@@ -116,6 +143,11 @@ CREATE TABLE IF NOT EXISTS public.wallets (
 ALTER TABLE public.wallets
 ADD COLUMN IF NOT EXISTS referral_balance INTEGER NOT NULL DEFAULT 0;
 
+INSERT INTO public.wallets (user_id, balance, referral_balance)
+SELECT id, 0, 0
+FROM auth.users
+ON CONFLICT (user_id) DO NOTHING;
+
 ALTER TABLE public.wallets ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Users can view their own wallet" ON public.wallets;
@@ -130,7 +162,7 @@ ON public.wallets FOR ALL USING (
   )
 );
 
--- 5. Wallet Transactions Table
+-- 5. Wallet Transactions Table & Type Check Constraint
 CREATE TABLE IF NOT EXISTS public.wallet_transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   wallet_id UUID NOT NULL REFERENCES public.wallets(id) ON DELETE CASCADE,
@@ -143,6 +175,24 @@ CREATE TABLE IF NOT EXISTS public.wallet_transactions (
   description TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Drop old check constraint and re-add with all allowed transaction types
+ALTER TABLE public.wallet_transactions
+DROP CONSTRAINT IF EXISTS wallet_transactions_type_check;
+
+ALTER TABLE public.wallet_transactions
+ADD CONSTRAINT wallet_transactions_type_check
+CHECK (type IN (
+  'deposit',
+  'credit',
+  'subscription_payment',
+  'donation',
+  'refund',
+  'referral_credit',
+  'transfer_to_deposit',
+  'withdrawal_request',
+  'withdrawal_declined_refund'
+));
 
 CREATE INDEX IF NOT EXISTS idx_wallet_tx_user ON public.wallet_transactions(user_id);
 
@@ -230,6 +280,11 @@ DECLARE
   v_percentage INTEGER := 10;
   v_reward_amount INTEGER;
 BEGIN
+  -- Auto-ensure profile exists
+  INSERT INTO public.profiles (id, email, role, created_at, updated_at)
+  VALUES (p_referred_user_id, (SELECT email FROM auth.users WHERE id = p_referred_user_id), 'reader', NOW(), NOW())
+  ON CONFLICT (id) DO NOTHING;
+
   SELECT value INTO v_percentage_str FROM public.app_settings WHERE key = 'referral_percentage';
   IF v_percentage_str IS NOT NULL AND v_percentage_str ~ '^\d+$' THEN
     v_percentage := v_percentage_str::INTEGER;
@@ -291,11 +346,17 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Minimum transfer amount is 100 XAF.');
   END IF;
 
+  -- Auto-ensure profile exists
+  INSERT INTO public.profiles (id, email, role, created_at, updated_at)
+  VALUES (p_user_id, (SELECT email FROM auth.users WHERE id = p_user_id), 'reader', NOW(), NOW())
+  ON CONFLICT (id) DO NOTHING;
+
   SELECT id, balance, referral_balance INTO v_wallet_id, v_dep_before, v_ref_before
   FROM public.wallets WHERE user_id = p_user_id FOR UPDATE;
 
   IF v_wallet_id IS NULL THEN
-    RETURN jsonb_build_object('success', false, 'error', 'Wallet not found.');
+    INSERT INTO public.wallets (user_id, balance, referral_balance) VALUES (p_user_id, 0, 0)
+    RETURNING id, balance, referral_balance INTO v_wallet_id, v_dep_before, v_ref_before;
   END IF;
 
   v_ref_before := COALESCE(v_ref_before, 0);
@@ -351,6 +412,11 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Invalid payout provider. Must be MTN or Orange.');
   END IF;
 
+  -- Auto-ensure profile exists to prevent foreign key violation
+  INSERT INTO public.profiles (id, email, role, created_at, updated_at)
+  VALUES (p_user_id, (SELECT email FROM auth.users WHERE id = p_user_id), 'reader', NOW(), NOW())
+  ON CONFLICT (id) DO NOTHING;
+
   SELECT created_at INTO v_last_request
   FROM public.withdrawal_requests
   WHERE user_id = p_user_id AND created_at > (NOW() - INTERVAL '7 days')
@@ -366,9 +432,14 @@ BEGIN
   SELECT id, referral_balance INTO v_wallet_id, v_ref_before
   FROM public.wallets WHERE user_id = p_user_id FOR UPDATE;
 
+  IF v_wallet_id IS NULL THEN
+    INSERT INTO public.wallets (user_id, balance, referral_balance) VALUES (p_user_id, 0, 0)
+    RETURNING id, referral_balance INTO v_wallet_id, v_ref_before;
+  END IF;
+
   v_ref_before := COALESCE(v_ref_before, 0);
 
-  IF v_wallet_id IS NULL OR v_ref_before < p_amount_xaf THEN
+  IF v_ref_before < p_amount_xaf THEN
     RETURN jsonb_build_object('success', false, 'error', 'Insufficient referral wallet balance for withdrawal.');
   END IF;
 
@@ -485,6 +556,11 @@ BEGIN
   IF p_amount_xaf <= 0 THEN
     RETURN jsonb_build_object('success', false, 'error', 'Amount must be greater than 0.');
   END IF;
+
+  -- Auto-ensure target profile exists
+  INSERT INTO public.profiles (id, email, role, created_at, updated_at)
+  VALUES (p_target_user_id, (SELECT email FROM auth.users WHERE id = p_target_user_id), 'reader', NOW(), NOW())
+  ON CONFLICT (id) DO NOTHING;
 
   SELECT id, referral_balance INTO v_wallet_id, v_ref_before
   FROM public.wallets WHERE user_id = p_target_user_id FOR UPDATE;
