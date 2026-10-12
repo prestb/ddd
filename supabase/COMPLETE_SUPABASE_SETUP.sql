@@ -63,7 +63,6 @@ CREATE TRIGGER trg_assign_referral_code
 BEFORE INSERT ON public.profiles
 FOR EACH ROW EXECUTE FUNCTION auto_assign_referral_code();
 
--- Populate existing profiles missing a referral_code
 UPDATE public.profiles
 SET referral_code = generate_unique_referral_code()
 WHERE referral_code IS NULL OR referral_code = '';
@@ -276,6 +275,193 @@ BEGIN
   WHERE id = v_referral.id;
 
   RETURN jsonb_build_object('status', 'rewarded', 'amount', v_reward_amount, 'percentage', v_percentage);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION transfer_referral_to_deposit_wallet(p_user_id UUID, p_amount_xaf INTEGER)
+RETURNS JSONB AS $$
+DECLARE
+  v_wallet_id UUID;
+  v_ref_before INTEGER;
+  v_ref_after INTEGER;
+  v_dep_before INTEGER;
+  v_dep_after INTEGER;
+BEGIN
+  IF p_amount_xaf < 100 THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Minimum transfer amount is 100 XAF.');
+  END IF;
+
+  SELECT id, balance, referral_balance INTO v_wallet_id, v_dep_before, v_ref_before
+  FROM public.wallets WHERE user_id = p_user_id FOR UPDATE;
+
+  IF v_wallet_id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Wallet not found.');
+  END IF;
+
+  v_ref_before := COALESCE(v_ref_before, 0);
+  v_dep_before := COALESCE(v_dep_before, 0);
+
+  IF v_ref_before < p_amount_xaf THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Insufficient referral wallet balance.');
+  END IF;
+
+  v_ref_after := v_ref_before - p_amount_xaf;
+  v_dep_after := v_dep_before + p_amount_xaf;
+
+  UPDATE public.wallets
+  SET referral_balance = v_ref_after, balance = v_dep_after, updated_at = NOW()
+  WHERE id = v_wallet_id;
+
+  INSERT INTO public.wallet_transactions (
+    wallet_id, user_id, type, amount, balance_before, balance_after, reference, description
+  ) VALUES (
+    v_wallet_id, p_user_id, 'transfer_to_deposit', p_amount_xaf,
+    v_ref_before, v_ref_after, 'trf-' || EXTRACT(EPOCH FROM NOW())::TEXT,
+    'Transfer from referral wallet to account balance (' || p_amount_xaf || ' XAF)'
+  );
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'transferred', p_amount_xaf,
+    'deposit_balance', v_dep_after,
+    'referral_balance', v_ref_after
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION request_wallet_withdrawal(
+  p_user_id UUID,
+  p_amount_xaf INTEGER,
+  p_provider TEXT,
+  p_phone TEXT
+)
+RETURNS JSONB AS $$
+DECLARE
+  v_wallet_id UUID;
+  v_ref_before INTEGER;
+  v_ref_after INTEGER;
+  v_last_request TIMESTAMPTZ;
+  v_request_id UUID;
+BEGIN
+  IF p_amount_xaf < 1000 THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Minimum withdrawal amount is 1,000 XAF.');
+  END IF;
+
+  IF LOWER(p_provider) NOT IN ('mtn', 'orange') THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Invalid payout provider. Must be MTN or Orange.');
+  END IF;
+
+  SELECT created_at INTO v_last_request
+  FROM public.withdrawal_requests
+  WHERE user_id = p_user_id AND created_at > (NOW() - INTERVAL '7 days')
+  ORDER BY created_at DESC LIMIT 1;
+
+  IF v_last_request IS NOT NULL THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'error', 'Withdrawals are limited to once per week. You can request another withdrawal after 7 days.'
+    );
+  END IF;
+
+  SELECT id, referral_balance INTO v_wallet_id, v_ref_before
+  FROM public.wallets WHERE user_id = p_user_id FOR UPDATE;
+
+  v_ref_before := COALESCE(v_ref_before, 0);
+
+  IF v_wallet_id IS NULL OR v_ref_before < p_amount_xaf THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Insufficient referral wallet balance for withdrawal.');
+  END IF;
+
+  v_ref_after := v_ref_before - p_amount_xaf;
+
+  -- Hold funds in escrow by deducting from referral balance
+  UPDATE public.wallets SET referral_balance = v_ref_after, updated_at = NOW() WHERE id = v_wallet_id;
+
+  -- Create pending withdrawal request
+  INSERT INTO public.withdrawal_requests (
+    user_id, amount_xaf, provider, phone, status
+  ) VALUES (
+    p_user_id, p_amount_xaf, LOWER(p_provider), p_phone, 'pending_admin_validation'
+  ) RETURNING id INTO v_request_id;
+
+  -- Log pending transaction
+  INSERT INTO public.wallet_transactions (
+    wallet_id, user_id, type, amount, balance_before, balance_after, reference, description
+  ) VALUES (
+    v_wallet_id, p_user_id, 'withdrawal_request', p_amount_xaf,
+    v_ref_before, v_ref_after, 'wd-' || v_request_id::TEXT,
+    'Withdrawal request via ' || UPPER(p_provider) || ' (' || p_amount_xaf || ' XAF to ' || p_phone || ') - Pending Admin Validation'
+  );
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'request_id', v_request_id,
+    'amount', p_amount_xaf,
+    'remaining_referral_balance', v_ref_after
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION admin_process_withdrawal_request(
+  p_request_id UUID,
+  p_action TEXT,
+  p_admin_notes TEXT DEFAULT NULL
+)
+RETURNS JSONB AS $$
+DECLARE
+  v_request RECORD;
+  v_wallet_id UUID;
+  v_ref_before INTEGER;
+  v_ref_after INTEGER;
+  v_caller_role TEXT;
+BEGIN
+  SELECT role INTO v_caller_role FROM public.profiles WHERE id = auth.uid();
+  IF v_caller_role <> 'admin' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Unauthorized. Only Ministry Administrators can validate payouts.');
+  END IF;
+
+  SELECT * INTO v_request FROM public.withdrawal_requests WHERE id = p_request_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Withdrawal request not found.');
+  END IF;
+
+  IF v_request.status <> 'pending_admin_validation' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Withdrawal request has already been processed.');
+  END IF;
+
+  IF p_action = 'validate' THEN
+    UPDATE public.withdrawal_requests
+    SET status = 'validated', validated_at = NOW(), admin_notes = COALESCE(p_admin_notes, 'Payout validated by admin')
+    WHERE id = p_request_id;
+
+    RETURN jsonb_build_object('success', true, 'status', 'validated');
+
+  ELSIF p_action = 'decline' THEN
+    -- Refund held amount back to user referral_balance
+    SELECT id, referral_balance INTO v_wallet_id, v_ref_before
+    FROM public.wallets WHERE user_id = v_request.user_id FOR UPDATE;
+
+    v_ref_before := COALESCE(v_ref_before, 0);
+    v_ref_after := v_ref_before + v_request.amount_xaf;
+
+    UPDATE public.wallets SET referral_balance = v_ref_after, updated_at = NOW() WHERE id = v_wallet_id;
+
+    UPDATE public.withdrawal_requests
+    SET status = 'declined', validated_at = NOW(), admin_notes = COALESCE(p_admin_notes, 'Declined by admin')
+    WHERE id = p_request_id;
+
+    INSERT INTO public.wallet_transactions (
+      wallet_id, user_id, type, amount, balance_before, balance_after, reference, description
+    ) VALUES (
+      v_wallet_id, v_request.user_id, 'withdrawal_declined_refund', v_request.amount_xaf,
+      v_ref_before, v_ref_after, 'wd-ref-' || v_request.id::TEXT,
+      'Refund for declined withdrawal request (' || v_request.amount_xaf || ' XAF)'
+    );
+
+    RETURN jsonb_build_object('success', true, 'status', 'declined', 'refunded', v_request.amount_xaf);
+  ELSE
+    RETURN jsonb_build_object('success', false, 'error', 'Invalid action. Must be validate or decline.');
+  END IF;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
