@@ -147,8 +147,14 @@ export default function MembershipScreen() {
       // Authoritative purchase completed
       setIsPremium(true);
       refreshContent();
-      if (data?.result?.remaining_balance !== undefined) setBalance(data.result.remaining_balance);
+      if (data?.result?.remaining_balance !== undefined) {
+        setBalance(data.result.remaining_balance);
+      } else {
+        const { data: w } = await supabase.from('wallets').select('balance').eq('user_id', session.user.id).maybeSingle();
+        if (w?.balance !== undefined) setBalance(w.balance);
+      }
       if (data?.result?.expires_at) {
+        setExpiresAtDate(new Date(data.result.expires_at));
         setExpiresAt(new Date(data.result.expires_at).toLocaleDateString(language === 'fr' ? 'fr-FR' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' }));
       }
       setMessage(language === 'fr' ? 'Abonnement Daily Dew Premium activé avec succès !' : 'Daily Dew Premium membership activated!');
