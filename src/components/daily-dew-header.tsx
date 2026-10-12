@@ -117,6 +117,10 @@ export default function DailyDewHeader() {
             <AppIcon name="sparkles" size={18} tintColor={DewDesign.colors.terracotta} />
             <Text style={[styles.menuItemText, isDark && styles.darkMenuText]}>{t(language, 'membershipAndBalance')}</Text>
           </Pressable>
+          <Pressable onPress={() => navigateTo('/referral')} style={styles.menuItem}>
+            <AppIcon name="gift" size={18} tintColor={DewDesign.colors.forest} />
+            <Text style={[styles.menuItemText, isDark && styles.darkMenuText]}>{t(language, 'referral')}</Text>
+          </Pressable>
           <Pressable onPress={() => navigateTo('/settings')} style={styles.menuItem}>
             <AppIcon name="gearshape" size={18} tintColor={iconTintColor} />
             <Text style={[styles.menuItemText, isDark && styles.darkMenuText]}>{t(language, 'settings')}</Text>

@@ -236,6 +236,32 @@ export default function ProfileScreen() {
                 </Pressable>
               </View>
 
+              {/* Referral Program Card */}
+              <View style={[styles.card, isDark && styles.darkCard]}>
+                <Text style={[styles.cardLabel, isDark && styles.darkLabel, { marginBottom: 12 }]}>
+                  {t(language, 'referral')}
+                </Text>
+
+                <Pressable
+                  onPress={() => router.push('/referral' as any)}
+                  style={styles.securityRow}
+                  accessibilityRole="button"
+                  accessibilityLabel={t(language, 'referralTitle')}>
+                  <View style={styles.securityIconBox}>
+                    <AppIcon name="gift" size={16} tintColor={DewDesign.colors.forest} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.securityRowTitle, isDark && styles.darkInk]}>
+                      {t(language, 'referralTitle')}
+                    </Text>
+                    <Text style={{ fontSize: 11, color: isDark ? DewDesign.colors.darkMuted : DewDesign.colors.body, marginTop: 2 }}>
+                      {language === 'fr' ? 'Invitez vos proches et gagnez 500 XAF' : 'Invite friends and earn 500 XAF'}
+                    </Text>
+                  </View>
+                  <AppIcon name="chevron.right" size={16} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />
+                </Pressable>
+              </View>
+
               {feedback ? (
                 <AppFeedback
                   type={feedback.type}

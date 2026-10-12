@@ -20,6 +20,7 @@ export default function AuthScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [referralCodeInput, setReferralCodeInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [mode, setMode] = useState<'signin' | 'signup' | 'recovery'>('signin');
@@ -163,6 +164,32 @@ export default function AuthScreen() {
     const result = mode === 'signin' ? await signIn(email, password, language) : await signUp(email, password, language);
     setBusy(false);
 
+    if (!result.error && mode === 'signup' && referralCodeInput.trim() && supabase) {
+      const cleanCode = referralCodeInput.trim().toUpperCase();
+      try {
+        const { data: referrer } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('referral_code', cleanCode)
+          .maybeSingle();
+
+        if (referrer?.id) {
+          const { data: authUserData } = await supabase.auth.getUser();
+          const newUserId = authUserData?.user?.id;
+          if (newUserId && newUserId !== referrer.id) {
+            await supabase.from('referrals').insert({
+              referrer_id: referrer.id,
+              referred_user_id: newUserId,
+              referral_code: cleanCode,
+              status: 'pending',
+            });
+          }
+        }
+      } catch {
+        // Ignore referral errors
+      }
+    }
+
     if (result.error) {
       setFeedback({
         type: 'error',
@@ -173,6 +200,7 @@ export default function AuthScreen() {
       setEmail('');
       setPassword('');
       setConfirmPassword('');
+      setReferralCodeInput('');
       setMode('signin');
       setFeedback({
         type: 'info',
@@ -182,6 +210,7 @@ export default function AuthScreen() {
     } else {
       setPassword('');
       setConfirmPassword('');
+      setReferralCodeInput('');
       setFeedback({
         type: 'success',
         title: t(language, 'authFeedbackSignedInTitle'),
@@ -265,23 +294,35 @@ export default function AuthScreen() {
                   )}
 
                   {mode === 'signup' && (
-                    <View style={[styles.passwordRow, isDark && styles.darkInput]}>
+                    <>
+                      <View style={[styles.passwordRow, isDark && styles.darkInput]}>
+                        <TextInput
+                          value={confirmPassword}
+                          onChangeText={setConfirmPassword}
+                          placeholder={t(language, 'confirmPassword')}
+                          placeholderTextColor={isDark ? DewDesign.colors.darkMuted : '#A8ADA7'}
+                          secureTextEntry={!showConfirmPassword}
+                          style={[styles.passwordInput, isDark && styles.darkInk]}
+                          accessibilityLabel={t(language, 'confirmPassword')}
+                        />
+                        <Pressable
+                          onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                          accessibilityRole="button"
+                          accessibilityLabel={showConfirmPassword ? t(language, 'hidePassword') : t(language, 'showPassword')}>
+                          <AppIcon name={showConfirmPassword ? 'eye.slash' : 'eye'} size={18} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
+                        </Pressable>
+                      </View>
+
                       <TextInput
-                        value={confirmPassword}
-                        onChangeText={setConfirmPassword}
-                        placeholder={t(language, 'confirmPassword')}
+                        value={referralCodeInput}
+                        onChangeText={setReferralCodeInput}
+                        placeholder={t(language, 'referralCodeOptional')}
                         placeholderTextColor={isDark ? DewDesign.colors.darkMuted : '#A8ADA7'}
-                        secureTextEntry={!showConfirmPassword}
-                        style={[styles.passwordInput, isDark && styles.darkInk]}
-                        accessibilityLabel={t(language, 'confirmPassword')}
+                        autoCapitalize="characters"
+                        style={[styles.input, isDark && styles.darkInput]}
+                        accessibilityLabel={t(language, 'referralCodeOptional')}
                       />
-                      <Pressable
-                        onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                        accessibilityRole="button"
-                        accessibilityLabel={showConfirmPassword ? t(language, 'hidePassword') : t(language, 'showPassword')}>
-                        <AppIcon name={showConfirmPassword ? 'eye.slash' : 'eye'} size={18} tintColor={isDark ? DewDesign.colors.darkInk : DewDesign.colors.forest} />
-                      </Pressable>
-                    </View>
+                    </>
                   )}
                 </>
               )}
