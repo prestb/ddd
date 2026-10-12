@@ -516,7 +516,7 @@ export default function AdminScreen() {
     let success = false;
     let errDetail: string | null = null;
 
-    // Try RPC first (schema cache safe)
+    // 1. Try set_app_setting RPC
     try {
       const { data: rpcData, error: rpcErr } = await supabase.rpc('set_app_setting', {
         p_key: 'referral_percentage',
@@ -527,10 +527,11 @@ export default function AdminScreen() {
       } else {
         errDetail = rpcErr?.message ?? rpcData?.error ?? null;
       }
-    } catch {
-      // Ignore RPC catch
+    } catch (e: any) {
+      errDetail = e?.message ?? null;
     }
 
+    // 2. Try Edge Function
     if (!success) {
       try {
         const { data, error } = await supabase.functions.invoke('admin-app-settings', {
@@ -541,20 +542,25 @@ export default function AdminScreen() {
         } else {
           errDetail = data?.message ?? error?.message ?? errDetail;
         }
-      } catch {
-        // Ignore Edge Function catch
+      } catch (e: any) {
+        errDetail = e?.message ?? errDetail;
       }
     }
 
+    // 3. Try direct app_settings table upsert
     if (!success) {
-      const { error: dbError } = await supabase
-        .from('app_settings')
-        .upsert({ key: 'referral_percentage', value: String(num), updated_at: new Date().toISOString() });
+      try {
+        const { error: dbError } = await supabase
+          .from('app_settings')
+          .upsert({ key: 'referral_percentage', value: String(num), updated_at: new Date().toISOString() });
 
-      if (!dbError) {
-        success = true;
-      } else {
-        errDetail = dbError.message ?? errDetail;
+        if (!dbError) {
+          success = true;
+        } else {
+          errDetail = dbError.message ?? errDetail;
+        }
+      } catch (e: any) {
+        errDetail = e?.message ?? errDetail;
       }
     }
 
@@ -563,7 +569,10 @@ export default function AdminScreen() {
     if (success) {
       Alert.alert('Setting saved', `Referral commission rate set to ${num}%.`);
     } else {
-      Alert.alert('Could not save setting', errDetail ?? 'Failed to update referral percentage.');
+      Alert.alert(
+        'Database Migration Required',
+        `Could not update app_settings table in Supabase (${errDetail ?? 'Table or function missing'}).\n\nPlease execute the COMPLETE_SUPABASE_SETUP.sql script in your Supabase SQL Editor.`
+      );
     }
   };
 
@@ -575,24 +584,92 @@ export default function AdminScreen() {
       return;
     }
     setSaving(true);
-    const { data, error } = await supabase.rpc('admin_credit_user_referral_wallet', {
-      p_target_user_id: creditUserModal.userId,
-      p_amount_xaf: numAmount,
-      p_description: creditDescription.trim() || 'Manual admin referral credit',
-    });
-    setSaving(false);
+    let success = false;
+    let errDetail: string | null = null;
 
-    if (error || !data?.success) {
-      const classified = classifyAppError(error ?? data?.error, 'admin');
-      Alert.alert(t(language, classified.titleKey), t(language, classified.messageKey));
-      return;
+    // 1. Try admin_credit_user_referral_wallet RPC
+    try {
+      const { data, error } = await supabase.rpc('admin_credit_user_referral_wallet', {
+        p_target_user_id: creditUserModal.userId,
+        p_amount_xaf: numAmount,
+        p_description: creditDescription.trim() || 'Manual admin referral credit',
+      });
+      if (!error && data?.success) {
+        success = true;
+      } else {
+        errDetail = error?.message ?? data?.error ?? null;
+      }
+    } catch (e: any) {
+      errDetail = e?.message ?? null;
     }
 
-    Alert.alert('Wallet credited', `Successfully credited ${numAmount.toLocaleString()} XAF to user referral wallet.`);
-    setCreditUserModal(null);
-    setCreditAmount('');
-    setCreditDescription('');
-    await loadUsers();
+    // 2. Direct database fallback if RPC not created in Supabase yet
+    if (!success) {
+      try {
+        let { data: walletData } = await supabase
+          .from('wallets')
+          .select('id, referral_balance')
+          .eq('user_id', creditUserModal.userId)
+          .maybeSingle();
+
+        if (!walletData) {
+          const { data: newW, error: wErr } = await supabase
+            .from('wallets')
+            .insert({ user_id: creditUserModal.userId, balance: 0, referral_balance: 0 })
+            .select('id, referral_balance')
+            .single();
+
+          if (wErr) {
+            errDetail = wErr.message;
+          } else {
+            walletData = newW;
+          }
+        }
+
+        if (walletData?.id) {
+          const refBefore = walletData.referral_balance ?? 0;
+          const refAfter = refBefore + numAmount;
+
+          const { error: uErr } = await supabase
+            .from('wallets')
+            .update({ referral_balance: refAfter, updated_at: new Date().toISOString() })
+            .eq('id', walletData.id);
+
+          if (!uErr) {
+            await supabase.from('wallet_transactions').insert({
+              wallet_id: walletData.id,
+              user_id: creditUserModal.userId,
+              type: 'referral_credit',
+              amount: numAmount,
+              balance_before: refBefore,
+              balance_after: refAfter,
+              reference: 'admin-credit-' + Date.now(),
+              description: creditDescription.trim() || 'Manual admin referral credit (' + numAmount + ' XAF)',
+            });
+            success = true;
+          } else {
+            errDetail = uErr.message;
+          }
+        }
+      } catch (e: any) {
+        errDetail = e?.message ?? errDetail;
+      }
+    }
+
+    setSaving(false);
+
+    if (success) {
+      Alert.alert('Wallet credited', `Successfully credited ${numAmount.toLocaleString()} XAF to user referral wallet.`);
+      setCreditUserModal(null);
+      setCreditAmount('');
+      setCreditDescription('');
+      await loadUsers();
+    } else {
+      Alert.alert(
+        'Database Migration Required',
+        `Could not credit referral wallet (${errDetail ?? 'Wallet table or column missing'}).\n\nPlease execute the COMPLETE_SUPABASE_SETUP.sql script in your Supabase SQL Editor.`
+      );
+    }
   };
 
   const handleProcessWithdrawal = async (requestId: string, action: 'validate' | 'decline') => {
