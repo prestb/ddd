@@ -1,6 +1,7 @@
 import AppIcon from '@/components/app-icon';
 import { DewDesign } from '@/constants/design';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSettings } from '@/context/settings-context';
 import { t, TranslationKey } from '@/lib/i18n';
 
@@ -25,6 +26,7 @@ export default function AdminBottomNav({
 }) {
   const { language, themeMode } = useSettings();
   const isDark = themeMode === 'dark';
+  const insets = useSafeAreaInsets();
 
   const visibleItems = items.filter((item) => {
     if (item.key === 'users' || item.key === 'finance') {
@@ -34,7 +36,7 @@ export default function AdminBottomNav({
   });
 
   return (
-    <View style={[styles.bar, isDark ? styles.darkBar : styles.lightBar]}>
+    <View style={[styles.bar, isDark ? styles.darkBar : styles.lightBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
       {visibleItems.map((item) => {
         const active = item.key === activeTab;
         return (

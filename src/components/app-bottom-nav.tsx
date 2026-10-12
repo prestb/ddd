@@ -1,6 +1,7 @@
 import AppIcon from '@/components/app-icon';
 import { router, usePathname } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSettings } from '@/context/settings-context';
 import { t } from '@/lib/i18n';
 import { DewDesign } from '@/constants/design';
@@ -15,9 +16,12 @@ export default function AppBottomNav() {
   const pathname = usePathname();
   const { language, themeMode } = useSettings();
   const isDark = themeMode === 'dark';
+  const insets = useSafeAreaInsets();
+
+  const bottomOffset = Math.max(insets.bottom, 12);
 
   return (
-    <View style={styles.floatingWrapper}>
+    <View style={[styles.floatingWrapper, { bottom: bottomOffset }]}>
       <View style={[styles.pillBar, isDark ? styles.darkPillBar : styles.lightPillBar, DewDesign.shadows.floating]}>
         {items.map((item) => {
           const active = item.path === '/' ? pathname === '/' : pathname.endsWith(item.path);
