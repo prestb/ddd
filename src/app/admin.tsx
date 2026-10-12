@@ -114,6 +114,9 @@ export default function AdminScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [createUserForm, setCreateUserForm] = useState({ email: '', password: '', role: 'reader' as 'reader' | 'editor' | 'admin' });
   const [editingUser, setEditingUser] = useState<{ id: string; role: string; email?: string | null } | null>(null);
+  const [creditUserModal, setCreditUserModal] = useState<{ userId: string; email?: string | null } | null>(null);
+  const [creditAmount, setCreditAmount] = useState('');
+  const [creditDescription, setCreditDescription] = useState('');
   const [referralPercentageInput, setReferralPercentageInput] = useState('10');
 
   // Financials State
@@ -513,17 +516,34 @@ export default function AdminScreen() {
     let success = false;
     let errDetail: string | null = null;
 
+    // Try RPC first (schema cache safe)
     try {
-      const { data, error } = await supabase.functions.invoke('admin-app-settings', {
-        body: { key: 'referral_percentage', value: String(num) },
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('set_app_setting', {
+        p_key: 'referral_percentage',
+        p_value: String(num),
       });
-      if (!error && data?.success) {
+      if (!rpcErr && rpcData?.success) {
         success = true;
       } else {
-        errDetail = data?.message ?? error?.message ?? null;
+        errDetail = rpcErr?.message ?? rpcData?.error ?? null;
       }
     } catch {
-      // Ignore function catch
+      // Ignore RPC catch
+    }
+
+    if (!success) {
+      try {
+        const { data, error } = await supabase.functions.invoke('admin-app-settings', {
+          body: { key: 'referral_percentage', value: String(num) },
+        });
+        if (!error && data?.success) {
+          success = true;
+        } else {
+          errDetail = data?.message ?? error?.message ?? errDetail;
+        }
+      } catch {
+        // Ignore Edge Function catch
+      }
     }
 
     if (!success) {
@@ -545,6 +565,34 @@ export default function AdminScreen() {
     } else {
       Alert.alert('Could not save setting', errDetail ?? 'Failed to update referral percentage.');
     }
+  };
+
+  const handleCreditReferralWallet = async () => {
+    if (!supabase || !creditUserModal) return;
+    const numAmount = parseInt(creditAmount, 10);
+    if (!numAmount || numAmount <= 0) {
+      Alert.alert('Invalid amount', 'Please enter a valid amount greater than 0.');
+      return;
+    }
+    setSaving(true);
+    const { data, error } = await supabase.rpc('admin_credit_user_referral_wallet', {
+      p_target_user_id: creditUserModal.userId,
+      p_amount_xaf: numAmount,
+      p_description: creditDescription.trim() || 'Manual admin referral credit',
+    });
+    setSaving(false);
+
+    if (error || !data?.success) {
+      const classified = classifyAppError(error ?? data?.error, 'admin');
+      Alert.alert(t(language, classified.titleKey), t(language, classified.messageKey));
+      return;
+    }
+
+    Alert.alert('Wallet credited', `Successfully credited ${numAmount.toLocaleString()} XAF to user referral wallet.`);
+    setCreditUserModal(null);
+    setCreditAmount('');
+    setCreditDescription('');
+    await loadUsers();
   };
 
   const handleProcessWithdrawal = async (requestId: string, action: 'validate' | 'decline') => {
@@ -1406,6 +1454,15 @@ export default function AdminScreen() {
                             </Text>
                           </View>
                           <View style={{ flexDirection: 'row', gap: 6 }}>
+                            {role === 'admin' ? (
+                              <Pressable
+                                onPress={() => setCreditUserModal({ userId: userItem.id, email: userItem.email })}
+                                style={[styles.actionBtnPill, { backgroundColor: DewDesign.colors.forest }]}>
+                                <AppIcon name="gift" size={12} tintColor="#FFFFFF" />
+                                <Text style={[styles.actionBtnLabel, { color: '#FFFFFF' }]}>Credit</Text>
+                              </Pressable>
+                            ) : null}
+
                             {role === 'admin' && !isAuthOnly ? (
                               <Pressable
                                 onPress={() => setEditingUser({ id: userItem.id, role: userItem.role, email: userItem.email })}
@@ -1759,6 +1816,47 @@ export default function AdminScreen() {
 
                 <Pressable disabled={saving} onPress={() => editingUser && handleUpdateUserRole(editingUser.id, editingUser.role)} style={[styles.saveButton, saving && styles.disabledButton]}>
                   <Text style={styles.publishButtonText}>{saving ? 'Updating...' : 'Update Role'}</Text>
+                </Pressable>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+
+        {/* Credit Referral Wallet Modal */}
+        <Modal visible={Boolean(creditUserModal)} transparent animationType="slide" onRequestClose={() => setCreditUserModal(null)}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={adminExtraStyles.modalBackdrop}>
+            <View style={[adminExtraStyles.modalPanel, isDark && styles.darkCard]}>
+              <ScrollView style={adminExtraStyles.modalScroll} contentContainerStyle={adminExtraStyles.modalContent}>
+                <View style={styles.composerHeader}>
+                  <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>Credit User Referral Wallet</Text>
+                  <Pressable onPress={() => setCreditUserModal(null)}>
+                    <AppIcon name="xmark" size={18} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />
+                  </Pressable>
+                </View>
+
+                <Text style={[styles.fieldLabel, isDark && styles.darkMuted]}>
+                  {`Target User: ${creditUserModal?.email ?? creditUserModal?.userId ?? ''}`}
+                </Text>
+
+                <TextInput
+                  value={creditAmount}
+                  onChangeText={setCreditAmount}
+                  placeholder="500"
+                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                  keyboardType="number-pad"
+                  style={[styles.formInput, isDark && styles.darkFormInput]}
+                />
+
+                <TextInput
+                  value={creditDescription}
+                  onChangeText={setCreditDescription}
+                  placeholder="Manual admin referral bonus"
+                  placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                  style={[styles.formInput, isDark && styles.darkFormInput]}
+                />
+
+                <Pressable disabled={saving} onPress={handleCreditReferralWallet} style={[styles.saveButton, saving && styles.disabledButton]}>
+                  <Text style={styles.publishButtonText}>{saving ? 'Crediting...' : 'Credit Wallet'}</Text>
                 </Pressable>
               </ScrollView>
             </View>

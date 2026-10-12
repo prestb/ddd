@@ -80,10 +80,9 @@ export default function ReferralScreen() {
       const userId = session.user.id;
 
       // 1. Fetch user's profile referral code & active percentage
-      const [{ data: profile }, { data: walletData }, { data: settingsRow }] = await Promise.all([
+      const [{ data: profile }, { data: walletData }] = await Promise.all([
         supabase.from('profiles').select('referral_code').eq('id', userId).maybeSingle(),
         supabase.from('wallets').select('balance, referral_balance').eq('user_id', userId).maybeSingle(),
-        supabase.from('app_settings').select('value').eq('key', 'referral_percentage').maybeSingle(),
       ]);
 
       if (profile?.referral_code) {
@@ -97,9 +96,16 @@ export default function ReferralScreen() {
         setReferralBalance(walletData.referral_balance ?? 0);
       }
 
-      if (settingsRow?.value) {
-        setReferralPercentage(settingsRow.value);
+      // Fetch referral percentage via RPC (schema cache safe)
+      let pctVal = '10';
+      try {
+        const { data: rpcVal } = await supabase.rpc('get_app_setting', { p_key: 'referral_percentage' });
+        if (rpcVal) pctVal = String(rpcVal);
+      } catch {
+        const { data: settingsRow } = await supabase.from('app_settings').select('value').eq('key', 'referral_percentage').maybeSingle();
+        if (settingsRow?.value) pctVal = settingsRow.value;
       }
+      setReferralPercentage(pctVal);
 
       // 2. Fetch referrals made by this user
       const { data: referralRows } = await supabase
