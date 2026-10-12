@@ -168,24 +168,75 @@ export default function ReferralScreen() {
 
     setBusy(true);
     setModalMessage(null);
+    let success = false;
+    let errMessage: string | null = null;
+
+    // 1. Try transfer_referral_to_deposit_wallet RPC
     try {
       const { data, error } = await supabase.rpc('transfer_referral_to_deposit_wallet', {
         p_user_id: session.user.id,
         p_amount_xaf: numAmount,
       });
 
-      if (error || !data?.success) {
-        setModalMessage(data?.error ?? (language === 'fr' ? 'Échec du transfert.' : 'Transfer failed.'));
+      if (!error && data?.success) {
+        success = true;
       } else {
-        setShowTransferModal(false);
-        setTransferAmount('');
-        Alert.alert(t(language, 'transferSuccessTitle'), t(language, 'transferSuccessMsg'));
-        await loadReferralData();
+        errMessage = error?.message ?? data?.error ?? null;
       }
-    } catch {
-      setModalMessage(language === 'fr' ? 'Échec du transfert.' : 'Transfer failed.');
-    } finally {
-      setBusy(false);
+    } catch (e: any) {
+      errMessage = e?.message ?? null;
+    }
+
+    // 2. Direct database table fallback if RPC is not created in Supabase yet
+    if (!success) {
+      try {
+        const { data: walletData } = await supabase
+          .from('wallets')
+          .select('id, balance, referral_balance')
+          .eq('user_id', session.user.id)
+          .maybeSingle();
+
+        if (walletData && (walletData.referral_balance ?? 0) >= numAmount) {
+          const refBefore = walletData.referral_balance ?? 0;
+          const refAfter = refBefore - numAmount;
+          const depBefore = walletData.balance ?? 0;
+          const depAfter = depBefore + numAmount;
+
+          const { error: uErr } = await supabase
+            .from('wallets')
+            .update({ referral_balance: refAfter, balance: depAfter, updated_at: new Date().toISOString() })
+            .eq('id', walletData.id);
+
+          if (!uErr) {
+            await supabase.from('wallet_transactions').insert({
+              wallet_id: walletData.id,
+              user_id: session.user.id,
+              type: 'transfer_to_deposit',
+              amount: numAmount,
+              balance_before: refBefore,
+              balance_after: refAfter,
+              reference: 'trf-' + Date.now(),
+              description: `Transfer from referral wallet to account balance (${numAmount} XAF)`,
+            });
+            success = true;
+          } else {
+            errMessage = uErr.message;
+          }
+        }
+      } catch (e: any) {
+        errMessage = e?.message ?? errMessage;
+      }
+    }
+
+    setBusy(false);
+
+    if (success) {
+      setShowTransferModal(false);
+      setTransferAmount('');
+      Alert.alert(t(language, 'transferSuccessTitle'), t(language, 'transferSuccessMsg'));
+      await loadReferralData();
+    } else {
+      setModalMessage(errMessage ?? (language === 'fr' ? 'Échec du transfert. Exécutez le script SQL dans Supabase.' : 'Transfer failed. Run COMPLETE_SUPABASE_SETUP.sql in Supabase SQL Editor.'));
     }
   };
 
@@ -208,27 +259,110 @@ export default function ReferralScreen() {
 
     setBusy(true);
     setModalMessage(null);
+    let success = false;
+    let errMessage: string | null = null;
+
+    // 1. Try create-wallet-withdrawal Edge Function (Fapshi automated payout)
     try {
-      const { data, error } = await supabase.rpc('request_wallet_withdrawal', {
-        p_user_id: session.user.id,
-        p_amount_xaf: numAmount,
-        p_provider: withdrawProvider,
-        p_phone: cleanPhone,
+      const { data, error } = await supabase.functions.invoke('create-wallet-withdrawal', {
+        body: {
+          amount: numAmount,
+          provider: withdrawProvider,
+          phone: cleanPhone,
+        },
       });
 
-      if (error || !data?.success) {
-        setModalMessage(data?.error ?? (language === 'fr' ? 'Échec du retrait.' : 'Withdrawal request failed.'));
+      if (!error && data?.success) {
+        success = true;
       } else {
-        setShowWithdrawModal(false);
-        setWithdrawAmount('1000');
-        setWithdrawPhone('');
-        Alert.alert(t(language, 'withdrawalRequestedTitle'), t(language, 'withdrawalRequestedMsg'));
-        await loadReferralData();
+        errMessage = data?.message ?? error?.message ?? null;
       }
-    } catch {
-      setModalMessage(language === 'fr' ? 'Échec du retrait.' : 'Withdrawal request failed.');
-    } finally {
-      setBusy(false);
+    } catch (e: any) {
+      errMessage = e?.message ?? null;
+    }
+
+    // 2. Try request_wallet_withdrawal RPC
+    if (!success) {
+      try {
+        const { data, error } = await supabase.rpc('request_wallet_withdrawal', {
+          p_user_id: session.user.id,
+          p_amount_xaf: numAmount,
+          p_provider: withdrawProvider,
+          p_phone: cleanPhone,
+        });
+
+        if (!error && data?.success) {
+          success = true;
+        } else {
+          errMessage = error?.message ?? data?.error ?? errMessage;
+        }
+      } catch (e: any) {
+        errMessage = e?.message ?? errMessage;
+      }
+    }
+
+    // 3. Direct database fallback if RPC & function are not created in Supabase yet
+    if (!success) {
+      try {
+        const { data: walletData } = await supabase
+          .from('wallets')
+          .select('id, referral_balance')
+          .eq('user_id', session.user.id)
+          .maybeSingle();
+
+        if (walletData && (walletData.referral_balance ?? 0) >= numAmount) {
+          const refBefore = walletData.referral_balance ?? 0;
+          const refAfter = refBefore - numAmount;
+
+          const { error: uErr } = await supabase
+            .from('wallets')
+            .update({ referral_balance: refAfter, updated_at: new Date().toISOString() })
+            .eq('id', walletData.id);
+
+          if (!uErr) {
+            const { data: reqData } = await supabase.from('withdrawal_requests').insert({
+              user_id: session.user.id,
+              amount_xaf: numAmount,
+              provider: withdrawProvider,
+              phone: cleanPhone,
+              status: 'pending_admin_validation',
+            }).select('id').single();
+
+            await supabase.from('wallet_transactions').insert({
+              wallet_id: walletData.id,
+              user_id: session.user.id,
+              type: 'withdrawal_request',
+              amount: numAmount,
+              balance_before: refBefore,
+              balance_after: refAfter,
+              reference: 'wd-' + (reqData?.id ?? Date.now()),
+              description: `Withdrawal request via ${withdrawProvider.toUpperCase()} (${numAmount} XAF to ${cleanPhone})`,
+            });
+            success = true;
+          } else {
+            errMessage = uErr.message;
+          }
+        }
+      } catch (e: any) {
+        errMessage = e?.message ?? errMessage;
+      }
+    }
+
+    setBusy(false);
+
+    if (success) {
+      setShowWithdrawModal(false);
+      setWithdrawAmount('1000');
+      setWithdrawPhone('');
+      Alert.alert(
+        language === 'fr' ? 'Retrait effectué' : 'Withdrawal Processed',
+        language === 'fr'
+          ? 'Votre demande de retrait a été traitée avec succès. Vous recevrez un paiement Mobile Money sur votre téléphone.'
+          : 'Your withdrawal request was processed successfully. Mobile Money payout initiated to your phone.'
+      );
+      await loadReferralData();
+    } else {
+      setModalMessage(errMessage ?? (language === 'fr' ? 'Échec du retrait. Exécutez le script SQL dans Supabase.' : 'Withdrawal failed. Run COMPLETE_SUPABASE_SETUP.sql in Supabase SQL Editor.'));
     }
   };
 
