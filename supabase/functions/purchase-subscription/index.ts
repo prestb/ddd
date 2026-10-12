@@ -87,10 +87,11 @@ Deno.serve(async (request) => {
       );
     }
 
-    // 3. Fulfill any pending referral reward for this user
+    // 3. Fulfill any pending referral reward for this user based on plan price
     try {
       const { data: referralResult, error: referralError } = await admin.rpc('fulfill_referral_reward', {
         p_referred_user_id: user.id,
+        p_subscription_price_xaf: plan.price_xaf,
       });
       if (referralError) {
         console.error('purchase-subscription: fulfill_referral_reward error', referralError);

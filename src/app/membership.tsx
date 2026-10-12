@@ -26,6 +26,7 @@ export default function MembershipScreen() {
   const [balance, setBalance] = useState(0); // Authoritative account balance XAF
   const [isPremium, setIsPremium] = useState(false); // Premium active status
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  const [expiresAtDate, setExpiresAtDate] = useState<Date | null>(null);
   const [loadingAccount, setLoadingAccount] = useState(true);
   const [accountError, setAccountError] = useState<string | null>(null);
   const [updatingAutoRenew, setUpdatingAutoRenew] = useState(false);
@@ -68,6 +69,7 @@ export default function MembershipScreen() {
           setIsPremium(subData.status === 'active');
           setAutoRenew(Boolean(subData.auto_renew));
           if (subData.expires_at) {
+            setExpiresAtDate(new Date(subData.expires_at));
             setExpiresAt(new Date(subData.expires_at).toLocaleDateString(language === 'fr' ? 'fr-FR' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' }));
           }
         }
@@ -225,6 +227,43 @@ export default function MembershipScreen() {
             </View>
           ) : (
             <>
+              {/* Expiration Reminder Banner */}
+              {isPremium && expiresAtDate && (Math.ceil((expiresAtDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) <= 3) && (Math.ceil((expiresAtDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) >= 0) && (
+                <View style={[styles.card, { backgroundColor: DewDesign.colors.terracottaSoft, borderColor: DewDesign.colors.terracotta, marginBottom: 14 }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                    <SymbolView name="bell.fill" size={20} tintColor={DewDesign.colors.terracotta} />
+                    <Text style={{ fontSize: 15, fontWeight: '800', color: DewDesign.colors.ink, flex: 1 }}>
+                      {Math.ceil((expiresAtDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) === 0 ? t(language, 'subExpiringTodayTitle') : t(language, 'subExpiring3DaysTitle')}
+                    </Text>
+                  </View>
+
+                  <Text style={{ fontSize: 13, lineHeight: 19, color: DewDesign.colors.body, marginBottom: 12 }}>
+                    {Math.ceil((expiresAtDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) === 0 ? t(language, 'subExpiringTodayMsg') : t(language, 'subExpiring3DaysMsg')}
+                  </Text>
+
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    {balance < 500 && (
+                      <Pressable
+                        onPress={() => router.push((session ? '/add-funds' : '/auth') as any)}
+                        style={[styles.addFundsBtn, { flex: 1, justifyContent: 'center' }]}>
+                        <SymbolView name="plus" size={14} tintColor="#FFFFFF" />
+                        <Text style={styles.addFundsText}>{t(language, 'addFunds')}</Text>
+                      </Pressable>
+                    )}
+
+                    {!autoRenew && (
+                      <Pressable
+                        disabled={updatingAutoRenew}
+                        onPress={handleToggleAutoRenew}
+                        style={[styles.addFundsBtn, { flex: 1, justifyContent: 'center', backgroundColor: DewDesign.colors.forest }]}>
+                        <SymbolView name="arrow.clockwise" size={14} tintColor="#FFFFFF" />
+                        <Text style={styles.addFundsText}>{t(language, 'enableAutoRenewBtn')}</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                </View>
+              )}
+
               {/* Membership Status Card */}
               <View style={[styles.statusCard, isDark && styles.darkCard, isPremium && styles.statusCardPremium]}>
                 <View style={styles.statusBadgeRow}>

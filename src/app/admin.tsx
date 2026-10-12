@@ -79,7 +79,7 @@ type PdfImport = {
   extracted_data?: { days?: ImportedDay[]; days_found?: number; review_count?: number } | null;
 };
 
-type FinanceLedger = 'payments' | 'wallet' | 'subscriptions' | 'donations';
+type FinanceLedger = 'payments' | 'wallet' | 'subscriptions' | 'donations' | 'withdrawals';
 
 export default function AdminScreen() {
   const { session } = useAuth();
@@ -114,12 +114,14 @@ export default function AdminScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [createUserForm, setCreateUserForm] = useState({ email: '', password: '', role: 'reader' as 'reader' | 'editor' | 'admin' });
   const [editingUser, setEditingUser] = useState<{ id: string; role: string; email?: string | null } | null>(null);
+  const [referralPercentageInput, setReferralPercentageInput] = useState('10');
 
   // Financials State
   const [financials, setFinancials] = useState<any>(null);
   const [financeLedger, setFinanceLedger] = useState<FinanceLedger>('payments');
   const [financePage, setFinancePage] = useState(1);
   const [loadingFinance, setLoadingFinance] = useState(false);
+  const [withdrawalRequests, setWithdrawalRequests] = useState<any[]>([]);
   const [selectedTxDetails, setSelectedTxDetails] = useState<any | null>(null);
 
   const [form, setForm] = useState({
@@ -202,6 +204,16 @@ export default function AdminScreen() {
   const loadFinancials = useCallback(async (ledger: FinanceLedger = financeLedger, page = financePage) => {
     if (!supabase) return;
     setLoadingFinance(true);
+    if (ledger === 'withdrawals') {
+      const { data: rows } = await supabase
+        .from('withdrawal_requests')
+        .select('*')
+        .order('created_at', { ascending: false });
+      setWithdrawalRequests(rows ?? []);
+      setLoadingFinance(false);
+      return;
+    }
+
     const { data, error } = await supabase.functions.invoke('admin-financials', {
       body: { ledger, page, pageSize: 25 },
     });
@@ -289,6 +301,15 @@ export default function AdminScreen() {
       .select('id, source_name, storage_path, status, error_message, created_at, extracted_data')
       .order('created_at', { ascending: false });
     setPdfImports((importRows ?? []) as PdfImport[]);
+
+    const { data: settingsData } = await supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'referral_percentage')
+      .maybeSingle();
+    if (settingsData?.value) {
+      setReferralPercentageInput(settingsData.value);
+    }
 
     const groupedOpens = new Map<string, number>();
     const groupedCompletions = new Map<string, number>();
@@ -425,6 +446,81 @@ export default function AdminScreen() {
     Alert.alert('Role updated', 'User role updated successfully.');
     setEditingUser(null);
     await loadUsers();
+  };
+
+  const handleDeleteUser = (targetUserId: string, targetEmail?: string | null) => {
+    Alert.alert(
+      t(language, 'deleteUserConfirmTitle'),
+      `${t(language, 'deleteUserConfirmMsg')}\n(${targetEmail ?? targetUserId})`,
+      [
+        { text: t(language, 'cancel'), style: 'cancel' },
+        {
+          text: t(language, 'deleteUserBtn'),
+          style: 'destructive',
+          onPress: async () => {
+            if (!supabase) return;
+            setSaving(true);
+            const { data, error } = await supabase.functions.invoke('admin-delete-user', {
+              body: { targetUserId },
+            });
+            setSaving(false);
+
+            if (error || !data?.success) {
+              const classified = classifyAppError(error ?? data?.error ?? data?.message, 'admin');
+              Alert.alert(t(language, classified.titleKey), t(language, classified.messageKey));
+              return;
+            }
+
+            Alert.alert('User deleted', 'User account deleted successfully.');
+            await loadUsers();
+          },
+        },
+      ]
+    );
+  };
+
+  const handleSaveReferralPercentage = async () => {
+    if (!supabase) return;
+    const num = parseInt(referralPercentageInput, 10);
+    if (!Number.isInteger(num) || num < 0 || num > 100) {
+      Alert.alert('Invalid percentage', 'Please enter a percentage between 0 and 100.');
+      return;
+    }
+    setSaving(true);
+    const { data, error } = await supabase.functions.invoke('admin-app-settings', {
+      body: { key: 'referral_percentage', value: String(num) },
+    });
+    setSaving(false);
+
+    if (error || !data?.success) {
+      const classified = classifyAppError(error ?? data?.error, 'admin');
+      Alert.alert(t(language, classified.titleKey), t(language, classified.messageKey));
+      return;
+    }
+
+    Alert.alert('Setting saved', `Referral commission rate set to ${num}%.`);
+  };
+
+  const handleProcessWithdrawal = async (requestId: string, action: 'validate' | 'decline') => {
+    if (!supabase) return;
+    setSaving(true);
+    const { data, error } = await supabase.rpc('admin_process_withdrawal_request', {
+      p_request_id: requestId,
+      p_action: action,
+    });
+    setSaving(false);
+
+    if (error || !data?.success) {
+      const classified = classifyAppError(error ?? data?.error, 'admin');
+      Alert.alert(t(language, classified.titleKey), t(language, classified.messageKey));
+      return;
+    }
+
+    Alert.alert(
+      'Withdrawal processed',
+      action === 'validate' ? 'Payout validated successfully.' : 'Withdrawal declined and funds refunded.'
+    );
+    await loadFinancials('withdrawals', financePage);
   };
 
   const executeStatusChange = async (edition: Edition, status: Edition['status']) => {
@@ -1263,17 +1359,50 @@ export default function AdminScreen() {
                                 : `Role: ${userItem.role.toUpperCase()}`}
                             </Text>
                           </View>
-                          {role === 'admin' && !isAuthOnly ? (
-                            <Pressable
-                              onPress={() => setEditingUser({ id: userItem.id, role: userItem.role, email: userItem.email })}
-                              style={styles.actionBtnPill}>
-                              <AppIcon name="pencil" size={12} tintColor={DewDesign.colors.forest} />
-                              <Text style={styles.actionBtnLabel}>Role</Text>
-                            </Pressable>
-                          ) : null}
+                          <View style={{ flexDirection: 'row', gap: 6 }}>
+                            {role === 'admin' && !isAuthOnly ? (
+                              <Pressable
+                                onPress={() => setEditingUser({ id: userItem.id, role: userItem.role, email: userItem.email })}
+                                style={styles.actionBtnPill}>
+                                <AppIcon name="pencil" size={12} tintColor={DewDesign.colors.forest} />
+                                <Text style={styles.actionBtnLabel}>Role</Text>
+                              </Pressable>
+                            ) : null}
+
+                            {role === 'admin' ? (
+                              <Pressable
+                                onPress={() => handleDeleteUser(userItem.id, userItem.email)}
+                                style={styles.actionBtnPill}>
+                                <AppIcon name="trash" size={12} tintColor={DewDesign.colors.terracotta} />
+                              </Pressable>
+                            ) : null}
+                          </View>
                         </View>
                       );
                     })
+                  )}
+
+                  {/* Referral Percentage Settings Card */}
+                  {role === 'admin' && (
+                    <View style={[styles.editionCard, isDark && styles.darkCard, { marginTop: 20 }]}>
+                      <Text style={[styles.sectionTitle, isDark && styles.darkInk, { fontSize: 15 }]}>Referral Commission Settings</Text>
+                      <Text style={[styles.editionMeta, isDark && styles.darkMuted, { marginBottom: 10 }]}>
+                        Set the percentage rate earned by referrers when an invited friend purchases a subscription.
+                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        <TextInput
+                          value={referralPercentageInput}
+                          onChangeText={setReferralPercentageInput}
+                          keyboardType="number-pad"
+                          placeholder="10"
+                          placeholderTextColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted}
+                          style={[styles.formInput, isDark && styles.darkFormInput, { flex: 1, marginBottom: 0 }]}
+                        />
+                        <Pressable disabled={saving} onPress={handleSaveReferralPercentage} style={styles.saveButton}>
+                          <Text style={styles.publishButtonText}>{saving ? 'Saving...' : 'Save %'}</Text>
+                        </Pressable>
+                      </View>
+                    </View>
                   )}
                 </View>
               ) : adminTab === 'finance' ? (
@@ -1306,26 +1435,73 @@ export default function AdminScreen() {
                   ) : null}
 
                   {/* Segmented Ledger Switcher */}
-                  <View style={{ flexDirection: 'row', gap: 6, marginVertical: 14 }}>
-                    {(['payments', 'wallet', 'subscriptions', 'donations'] as const).map((led) => (
-                      <Pressable
-                        key={led}
-                        onPress={() => { setFinanceLedger(led); setFinancePage(1); }}
-                        style={[styles.statusButton, financeLedger === led && styles.publishButton, { flex: 1, alignItems: 'center' }]}>
-                        <Text style={[styles.statusButtonText, financeLedger === led && styles.publishButtonText]}>{led.toUpperCase()}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 14 }}>
+                    <View style={{ flexDirection: 'row', gap: 6 }}>
+                      {(['payments', 'wallet', 'subscriptions', 'donations', 'withdrawals'] as const).map((led) => (
+                        <Pressable
+                          key={led}
+                          onPress={() => { setFinanceLedger(led); setFinancePage(1); }}
+                          style={[styles.statusButton, financeLedger === led && styles.publishButton, { paddingHorizontal: 12, alignItems: 'center' }]}>
+                          <Text style={[styles.statusButtonText, financeLedger === led && styles.publishButtonText]}>{led.toUpperCase()}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </ScrollView>
 
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                     <Text style={[adminExtraStyles.panelHeading, isDark && styles.darkInk, { marginTop: 0 }]}>
-                      {`${financeLedger.toUpperCase()} LEDGER (${financials?.total ?? 0} total)`}
+                      {`${financeLedger.toUpperCase()} LEDGER (${financeLedger === 'withdrawals' ? withdrawalRequests.length : financials?.total ?? 0} total)`}
                     </Text>
                     {loadingFinance ? <ActivityIndicator size="small" color={DewDesign.colors.forest} /> : null}
                   </View>
 
-                  {/* Paginated Ledger Rows */}
-                  {(financials?.rows ?? []).map((row: any) => (
+                  {/* Paginated / Filtered Ledger Rows */}
+                  {financeLedger === 'withdrawals' ? (
+                    withdrawalRequests.length === 0 ? (
+                      <Text style={[styles.emptyText, isDark && styles.darkMuted]}>No withdrawal requests yet.</Text>
+                    ) : (
+                      withdrawalRequests.map((req) => (
+                        <View key={req.id} style={[styles.editionCard, isDark && styles.darkCard, { marginBottom: 10 }]}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                            <View style={{ flex: 1, marginRight: 8 }}>
+                              <Text style={[styles.editionTitle, isDark && styles.darkInk]}>
+                                {`${(req.amount_xaf || 0).toLocaleString()} XAF (${String(req.provider).toUpperCase()} - ${req.phone})`}
+                              </Text>
+                              <Text style={[styles.editionMeta, isDark && styles.darkMuted]}>
+                                {`Status: ${req.status.toUpperCase()} · ${new Date(req.created_at).toLocaleDateString()}`}
+                              </Text>
+                            </View>
+                            <View style={[styles.statusButton, req.status === 'validated' ? styles.publishButton : req.status === 'declined' ? { backgroundColor: DewDesign.colors.terracottaSoft } : null]}>
+                              <Text style={[styles.statusButtonText, req.status === 'validated' ? styles.publishButtonText : req.status === 'declined' ? { color: DewDesign.colors.terracotta } : null]}>
+                                {req.status.toUpperCase()}
+                              </Text>
+                            </View>
+                          </View>
+
+                          {req.status === 'pending_admin_validation' && (
+                            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                              <Pressable
+                                disabled={saving}
+                                onPress={() => handleProcessWithdrawal(req.id, 'validate')}
+                                style={[styles.actionBtnPill, { backgroundColor: DewDesign.colors.forest }]}>
+                                <AppIcon name="checkmark" size={12} tintColor="#FFFFFF" />
+                                <Text style={[styles.actionBtnLabel, { color: '#FFFFFF' }]}>Validate Payout</Text>
+                              </Pressable>
+
+                              <Pressable
+                                disabled={saving}
+                                onPress={() => handleProcessWithdrawal(req.id, 'decline')}
+                                style={styles.actionBtnPill}>
+                                <AppIcon name="xmark" size={12} tintColor={DewDesign.colors.terracotta} />
+                                <Text style={[styles.actionBtnLabel, { color: DewDesign.colors.terracotta }]}>Decline</Text>
+                              </Pressable>
+                            </View>
+                          )}
+                        </View>
+                      ))
+                    )
+                  ) : (
+                    (financials?.rows ?? []).map((row: any) => (
                     <Pressable
                       key={row.id}
                       onPress={() => setSelectedTxDetails(row)}
@@ -1350,7 +1526,7 @@ export default function AdminScreen() {
                         ) : null}
                       </View>
                     </Pressable>
-                  ))}
+                  )))}
 
                   {/* Pagination Controls */}
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 14 }}>

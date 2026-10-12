@@ -68,6 +68,13 @@ const iconMap: Record<string, string> = {
   moon: 'moon-waning-crescent',
   'eye.slash': 'eye-off-outline',
   'checkmark.seal.fill': 'check-decagram',
+  gift: 'gift-outline',
+  banknote: 'bank-outline',
+  'arrow.left.arrow.right': 'swap-horizontal',
+  'person.3': 'account-group-outline',
+  'person.crop.circle.badge.plus': 'account-plus-outline',
+  'arrow.up.circle': 'arrow-up-circle-outline',
+  'arrow.down.circle': 'arrow-down-circle-outline',
 };
 
 type AppIconProps = {
