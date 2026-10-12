@@ -179,6 +179,19 @@ Deno.serve(async (request) => {
       description: `Mobile Money withdrawal via ${provider.toUpperCase()} (${amount} XAF to ${phone})`,
     });
 
+    // Record system app event for admin notification
+    await admin.from('app_events').insert({
+      user_id: user.id,
+      event_type: 'withdrawal_processed',
+      metadata: {
+        amount,
+        phone,
+        provider,
+        fapshiTransId,
+        withdrawal_request_id: reqData?.id,
+      },
+    });
+
     return json({
       success: true,
       amount,

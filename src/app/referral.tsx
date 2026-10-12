@@ -171,7 +171,7 @@ export default function ReferralScreen() {
     let success = false;
     let errMessage: string | null = null;
 
-    // 1. Try transfer_referral_to_deposit_wallet RPC
+    // 1. Execute transfer_referral_to_deposit_wallet RPC
     try {
       const { data, error } = await supabase.rpc('transfer_referral_to_deposit_wallet', {
         p_user_id: session.user.id,
@@ -180,52 +180,13 @@ export default function ReferralScreen() {
 
       if (!error && data?.success) {
         success = true;
+        if (data.referral_balance !== undefined) setReferralBalance(data.referral_balance);
+        if (data.deposit_balance !== undefined) setDepositBalance(data.deposit_balance);
       } else {
-        errMessage = error?.message ?? data?.error ?? null;
+        errMessage = data?.error ?? error?.message ?? null;
       }
     } catch (e: any) {
       errMessage = e?.message ?? null;
-    }
-
-    // 2. Direct database table fallback if RPC is not created in Supabase yet
-    if (!success) {
-      try {
-        const { data: walletData } = await supabase
-          .from('wallets')
-          .select('id, balance, referral_balance')
-          .eq('user_id', session.user.id)
-          .maybeSingle();
-
-        if (walletData && (walletData.referral_balance ?? 0) >= numAmount) {
-          const refBefore = walletData.referral_balance ?? 0;
-          const refAfter = refBefore - numAmount;
-          const depBefore = walletData.balance ?? 0;
-          const depAfter = depBefore + numAmount;
-
-          const { error: uErr } = await supabase
-            .from('wallets')
-            .update({ referral_balance: refAfter, balance: depAfter, updated_at: new Date().toISOString() })
-            .eq('id', walletData.id);
-
-          if (!uErr) {
-            await supabase.from('wallet_transactions').insert({
-              wallet_id: walletData.id,
-              user_id: session.user.id,
-              type: 'transfer_to_deposit',
-              amount: numAmount,
-              balance_before: refBefore,
-              balance_after: refAfter,
-              reference: 'trf-' + Date.now(),
-              description: `Transfer from referral wallet to account balance (${numAmount} XAF)`,
-            });
-            success = true;
-          } else {
-            errMessage = uErr.message;
-          }
-        }
-      } catch (e: any) {
-        errMessage = e?.message ?? errMessage;
-      }
     }
 
     setBusy(false);
@@ -236,7 +197,12 @@ export default function ReferralScreen() {
       Alert.alert(t(language, 'transferSuccessTitle'), t(language, 'transferSuccessMsg'));
       await loadReferralData();
     } else {
-      setModalMessage(errMessage ?? (language === 'fr' ? 'Échec du transfert. Exécutez le script SQL dans Supabase.' : 'Transfer failed. Run COMPLETE_SUPABASE_SETUP.sql in Supabase SQL Editor.'));
+      setModalMessage(
+        errMessage ??
+          (language === 'fr'
+            ? 'Échec du transfert. Veuillez exécuter le script SQL dans votre Supabase SQL Editor.'
+            : 'Transfer failed. Please run COMPLETE_SUPABASE_SETUP.sql in your Supabase SQL Editor.')
+      );
     }
   };
 
