@@ -1027,8 +1027,6 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 GRANT EXECUTE ON FUNCTION public.link_user_referral_code(UUID, TEXT) TO service_role, postgres, authenticated, anon;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- 9. Force PostgREST schema cache reload
 NOTIFY pgrst, 'reload schema';
