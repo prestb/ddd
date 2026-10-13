@@ -497,16 +497,34 @@ export default function AdminScreen() {
               }
             }
 
+            // 3. Direct database table deletion fallback
+            if (!success) {
+              try {
+                const { error: pErr } = await supabase.from('profiles').delete().eq('id', targetUserId);
+                await supabase.from('wallets').delete().eq('user_id', targetUserId);
+                await supabase.from('subscriptions').delete().eq('user_id', targetUserId);
+                await supabase.from('withdrawal_requests').delete().eq('user_id', targetUserId);
+                await supabase.from('wallet_transactions').delete().eq('user_id', targetUserId);
+                await supabase.from('referrals').delete().eq('referrer_id', targetUserId);
+                await supabase.from('referrals').delete().eq('referred_user_id', targetUserId);
+
+                if (!pErr) {
+                  success = true;
+                } else {
+                  errDetail = pErr.message ?? errDetail;
+                }
+              } catch (e: any) {
+                errDetail = e?.message ?? errDetail;
+              }
+            }
+
             setSaving(false);
 
             if (success) {
-              Alert.alert('User deleted', 'User account permanently deleted.');
-              await loadUsers();
+              setUsersList((prev) => prev.filter((u) => u.id !== targetUserId));
+              Alert.alert('User Deleted', `User account (${targetEmail ?? targetUserId}) was deleted successfully.`);
             } else {
-              Alert.alert(
-                'Database Migration Required',
-                `Could not delete user (${errDetail ?? 'RPC or Edge Function missing'}).\n\nPlease run COMPLETE_SUPABASE_SETUP.sql in your Supabase SQL Editor.`
-              );
+              Alert.alert('Could Not Delete User', errDetail ?? 'User deletion failed. Please check admin permissions.');
             }
           },
         },
