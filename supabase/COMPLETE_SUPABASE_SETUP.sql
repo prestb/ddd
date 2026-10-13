@@ -287,8 +287,12 @@ CREATE TABLE IF NOT EXISTS public.wallet_transactions (
   balance_after INTEGER,
   reference TEXT,
   description TEXT,
+  metadata JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE public.wallet_transactions
+ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
 
 -- Drop old check constraint
 ALTER TABLE public.wallet_transactions
@@ -677,7 +681,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
-GRANT EXECUTE ON FUNCTION public.purchase_subscription(UUID, UUID, TEXT) TO service_role, postgres, authenticated;
+GRANT EXECUTE ON FUNCTION public.purchase_subscription(UUID, UUID, TEXT, TEXT) TO service_role, postgres, authenticated;
 GRANT EXECUTE ON FUNCTION public.debit_wallet(UUID, INTEGER, TEXT, TEXT, JSONB) TO service_role, postgres, authenticated;
 
 CREATE OR REPLACE FUNCTION transfer_referral_to_deposit_wallet(p_user_id UUID, p_amount_xaf INTEGER)
