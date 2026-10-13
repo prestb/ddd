@@ -67,8 +67,8 @@ FOR EACH ROW EXECUTE FUNCTION auto_assign_referral_code();
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO public.profiles (id, role, created_at, updated_at)
-  VALUES (NEW.id, 'reader', NOW(), NOW())
+  INSERT INTO public.profiles (id)
+  VALUES (NEW.id)
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.wallets (user_id, balance, referral_balance)
@@ -85,9 +85,8 @@ AFTER INSERT ON auth.users
 FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- Backfill any existing users in auth.users missing from public.profiles and public.wallets
-INSERT INTO public.profiles (id, role, created_at, updated_at)
-SELECT id, 'reader', NOW(), NOW()
-FROM auth.users
+INSERT INTO public.profiles (id)
+SELECT id FROM auth.users
 ON CONFLICT (id) DO NOTHING;
 
 UPDATE public.profiles
@@ -281,8 +280,8 @@ DECLARE
   v_reward_amount INTEGER;
 BEGIN
   -- Auto-ensure profile exists
-  INSERT INTO public.profiles (id, role, created_at, updated_at)
-  VALUES (p_referred_user_id, 'reader', NOW(), NOW())
+  INSERT INTO public.profiles (id)
+  VALUES (p_referred_user_id)
   ON CONFLICT (id) DO NOTHING;
 
   SELECT value INTO v_percentage_str FROM public.app_settings WHERE key = 'referral_percentage';
@@ -347,8 +346,8 @@ BEGIN
   END IF;
 
   -- Auto-ensure profile exists
-  INSERT INTO public.profiles (id, role, created_at, updated_at)
-  VALUES (p_user_id, 'reader', NOW(), NOW())
+  INSERT INTO public.profiles (id)
+  VALUES (p_user_id)
   ON CONFLICT (id) DO NOTHING;
 
   SELECT id, balance, referral_balance INTO v_wallet_id, v_dep_before, v_ref_before
@@ -413,8 +412,8 @@ BEGIN
   END IF;
 
   -- Auto-ensure profile exists to prevent foreign key violation
-  INSERT INTO public.profiles (id, role, created_at, updated_at)
-  VALUES (p_user_id, 'reader', NOW(), NOW())
+  INSERT INTO public.profiles (id)
+  VALUES (p_user_id)
   ON CONFLICT (id) DO NOTHING;
 
   SELECT created_at INTO v_last_request
@@ -558,8 +557,8 @@ BEGIN
   END IF;
 
   -- Auto-ensure target profile exists
-  INSERT INTO public.profiles (id, role, created_at, updated_at)
-  VALUES (p_target_user_id, 'reader', NOW(), NOW())
+  INSERT INTO public.profiles (id)
+  VALUES (p_target_user_id)
   ON CONFLICT (id) DO NOTHING;
 
   SELECT id, referral_balance INTO v_wallet_id, v_ref_before
