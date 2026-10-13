@@ -118,14 +118,14 @@ DECLARE
   v_annual_id UUID;
 BEGIN
   -- Find or insert single canonical Monthly plan
-  SELECT id INTO v_monthly_id FROM public.subscription_plans WHERE ILIKE(name, 'Monthly') ORDER BY created_at DESC LIMIT 1;
+  SELECT id INTO v_monthly_id FROM public.subscription_plans WHERE name ILIKE 'Monthly' ORDER BY created_at DESC LIMIT 1;
   IF v_monthly_id IS NULL THEN
     INSERT INTO public.subscription_plans (name, duration_days, price_xaf, is_active)
     VALUES ('Monthly', 30, 500, true) RETURNING id INTO v_monthly_id;
   END IF;
 
   -- Find or insert single canonical Annual plan
-  SELECT id INTO v_annual_id FROM public.subscription_plans WHERE ILIKE(name, 'Annual') ORDER BY created_at DESC LIMIT 1;
+  SELECT id INTO v_annual_id FROM public.subscription_plans WHERE name ILIKE 'Annual' ORDER BY created_at DESC LIMIT 1;
   IF v_annual_id IS NULL THEN
     INSERT INTO public.subscription_plans (name, duration_days, price_xaf, is_active)
     VALUES ('Annual', 365, 5000, true) RETURNING id INTO v_annual_id;
@@ -134,26 +134,26 @@ BEGIN
   -- Update any subscriptions pointing to duplicate Monthly/Annual plan IDs
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'subscriptions') THEN
     UPDATE public.subscriptions SET plan_id = v_monthly_id
-    WHERE plan_id IN (SELECT id FROM public.subscription_plans WHERE ILIKE(name, 'Monthly') AND id <> v_monthly_id);
+    WHERE plan_id IN (SELECT id FROM public.subscription_plans WHERE name ILIKE 'Monthly' AND id <> v_monthly_id);
 
     UPDATE public.subscriptions SET plan_id = v_annual_id
-    WHERE plan_id IN (SELECT id FROM public.subscription_plans WHERE ILIKE(name, 'Annual') AND id <> v_annual_id);
+    WHERE plan_id IN (SELECT id FROM public.subscription_plans WHERE name ILIKE 'Annual' AND id <> v_annual_id);
   END IF;
 
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'subscription_transactions') THEN
     UPDATE public.subscription_transactions SET plan_id = v_monthly_id
-    WHERE plan_id IN (SELECT id FROM public.subscription_plans WHERE ILIKE(name, 'Monthly') AND id <> v_monthly_id);
+    WHERE plan_id IN (SELECT id FROM public.subscription_plans WHERE name ILIKE 'Monthly' AND id <> v_monthly_id);
 
     UPDATE public.subscription_transactions SET plan_id = v_annual_id
-    WHERE plan_id IN (SELECT id FROM public.subscription_plans WHERE ILIKE(name, 'Annual') AND id <> v_annual_id);
+    WHERE plan_id IN (SELECT id FROM public.subscription_plans WHERE name ILIKE 'Annual' AND id <> v_annual_id);
   END IF;
 
   -- Now safely delete orphaned duplicate plan rows
   DELETE FROM public.subscription_plans
-  WHERE id NOT IN (v_monthly_id, v_annual_id) AND ILIKE(name, 'Monthly');
+  WHERE id NOT IN (v_monthly_id, v_annual_id) AND name ILIKE 'Monthly';
 
   DELETE FROM public.subscription_plans
-  WHERE id NOT IN (v_monthly_id, v_annual_id) AND ILIKE(name, 'Annual');
+  WHERE id NOT IN (v_monthly_id, v_annual_id) AND name ILIKE 'Annual';
 END $$;
 
 ALTER TABLE public.subscription_plans
@@ -566,14 +566,14 @@ BEGIN
   IF v_plan_name IS NULL AND p_plan_name IS NOT NULL THEN
     SELECT id, name, duration_days, price_xaf, is_active
     INTO v_plan_id, v_plan_name, v_duration_days, v_price_xaf, v_is_active
-    FROM public.subscription_plans WHERE ILIKE(name, p_plan_name) AND is_active = true LIMIT 1;
+    FROM public.subscription_plans WHERE name ILIKE p_plan_name AND is_active = true LIMIT 1;
   END IF;
 
   -- Fallback to Annual if plan still not found
   IF v_plan_name IS NULL THEN
     SELECT id, name, duration_days, price_xaf, is_active
     INTO v_plan_id, v_plan_name, v_duration_days, v_price_xaf, v_is_active
-    FROM public.subscription_plans WHERE ILIKE(name, 'Annual') LIMIT 1;
+    FROM public.subscription_plans WHERE name ILIKE 'Annual' LIMIT 1;
   END IF;
 
   IF v_plan_name IS NULL THEN
