@@ -92,7 +92,7 @@ BEGIN
   BEGIN
     v_ref_code := UPPER(TRIM(NEW.raw_user_meta_data->>'referral_code'));
     IF v_ref_code IS NOT NULL AND v_ref_code <> '' THEN
-      SELECT id INTO v_referrer_id FROM public.profiles WHERE referral_code = v_ref_code LIMIT 1;
+      SELECT id INTO v_referrer_id FROM public.profiles WHERE UPPER(referral_code) = v_ref_code LIMIT 1;
       IF v_referrer_id IS NOT NULL AND v_referrer_id <> NEW.id THEN
         INSERT INTO public.referrals (referrer_id, referred_user_id, referral_code, status)
         VALUES (v_referrer_id, NEW.id, v_ref_code, 'pending')
@@ -1004,7 +1004,7 @@ BEGIN
   INSERT INTO public.profiles (id) VALUES (p_user_id) ON CONFLICT (id) DO NOTHING;
 
   -- Look up referrer
-  SELECT id INTO v_referrer_id FROM public.profiles WHERE referral_code = v_clean_code LIMIT 1;
+  SELECT id INTO v_referrer_id FROM public.profiles WHERE UPPER(referral_code) = v_clean_code LIMIT 1;
   IF v_referrer_id IS NULL THEN
     RETURN jsonb_build_object('success', false, 'error', 'Referrer not found.');
   END IF;

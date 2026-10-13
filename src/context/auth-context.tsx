@@ -122,7 +122,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       if (!supabase) return { error: t(language, 'authGenericError') };
       const cleanEmail = email.trim();
       const cleanRefCode = referralCode ? referralCode.trim().toUpperCase() : undefined;
-      const { error } = await supabase.auth.signUp({
+      const { data: signUpData, error } = await supabase.auth.signUp({
         email: cleanEmail,
         password,
         options: {
@@ -132,6 +132,17 @@ export function AuthProvider({ children }: PropsWithChildren) {
       });
       if (error) {
         return { error: mapAuthError(error, 'signup', language) };
+      }
+
+      // Proactive instant link into referrals table
+      if (signUpData?.user?.id && cleanRefCode) {
+        const newUserId = signUpData.user.id;
+        Promise.resolve(
+          supabase.rpc('link_user_referral_code', {
+            p_user_id: newUserId,
+            p_referral_code: cleanRefCode,
+          })
+        ).catch(() => undefined);
       }
 
       return { needsConfirmation: true };
