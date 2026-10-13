@@ -466,38 +466,47 @@ export default function AdminScreen() {
             let success = false;
             let errDetail: string | null = null;
 
+            // 1. Try admin_delete_user_account RPC (deletes auth.users and all tables)
             try {
-              const { data, error } = await supabase.functions.invoke('admin-delete-user', {
-                body: { targetUserId },
+              const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_delete_user_account', {
+                p_target_user_id: targetUserId,
               });
-              if (!error && data?.success) {
+
+              if (!rpcErr && rpcData?.success) {
                 success = true;
               } else {
-                errDetail = data?.message ?? error?.message ?? null;
+                errDetail = rpcErr?.message ?? rpcData?.error ?? null;
               }
-            } catch {
-              // Ignore function catch
+            } catch (e: any) {
+              errDetail = e?.message ?? null;
             }
 
+            // 2. Try admin-delete-user Edge Function fallback
             if (!success) {
-              const { error: pErr } = await supabase.from('profiles').delete().eq('id', targetUserId);
-              await supabase.from('wallets').delete().eq('user_id', targetUserId);
-              await supabase.from('subscriptions').delete().eq('user_id', targetUserId);
-
-              if (!pErr) {
-                success = true;
-              } else {
-                errDetail = pErr.message ?? errDetail;
+              try {
+                const { data, error } = await supabase.functions.invoke('admin-delete-user', {
+                  body: { targetUserId },
+                });
+                if (!error && data?.success) {
+                  success = true;
+                } else {
+                  errDetail = data?.message ?? error?.message ?? errDetail;
+                }
+              } catch (e: any) {
+                errDetail = e?.message ?? errDetail;
               }
             }
 
             setSaving(false);
 
             if (success) {
-              Alert.alert('User deleted', 'User account deleted successfully.');
+              Alert.alert('User deleted', 'User account permanently deleted.');
               await loadUsers();
             } else {
-              Alert.alert('User deletion error', errDetail ?? 'Could not delete the user account right now.');
+              Alert.alert(
+                'Database Migration Required',
+                `Could not delete user (${errDetail ?? 'RPC or Edge Function missing'}).\n\nPlease run COMPLETE_SUPABASE_SETUP.sql in your Supabase SQL Editor.`
+              );
             }
           },
         },

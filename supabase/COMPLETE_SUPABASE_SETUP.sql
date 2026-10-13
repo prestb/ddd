@@ -63,21 +63,29 @@ CREATE TRIGGER trg_assign_referral_code
 BEFORE INSERT ON public.profiles
 FOR EACH ROW EXECUTE FUNCTION auto_assign_referral_code();
 
--- Auto-create profiles and wallets on new user signup
+-- Exception-safe auto-create profiles and wallets on new user signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO public.profiles (id)
-  VALUES (NEW.id)
-  ON CONFLICT (id) DO NOTHING;
+  BEGIN
+    INSERT INTO public.profiles (id)
+    VALUES (NEW.id)
+    ON CONFLICT (id) DO NOTHING;
+  EXCEPTION WHEN OTHERS THEN
+    -- Prevent trigger error from blocking user creation in auth.users
+  END;
 
-  INSERT INTO public.wallets (user_id, balance, referral_balance)
-  VALUES (NEW.id, 0, 0)
-  ON CONFLICT (user_id) DO NOTHING;
+  BEGIN
+    INSERT INTO public.wallets (user_id, balance, referral_balance)
+    VALUES (NEW.id, 0, 0)
+    ON CONFLICT (user_id) DO NOTHING;
+  EXCEPTION WHEN OTHERS THEN
+    -- Prevent trigger error from blocking user creation in auth.users
+  END;
 
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
@@ -599,6 +607,34 @@ BEGIN
   );
 
   RETURN jsonb_build_object('success', true, 'new_referral_balance', v_ref_after, 'amount', p_amount_xaf);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Stored RPC: Admin Delete User Account (Deletes from auth.users and all related tables)
+CREATE OR REPLACE FUNCTION admin_delete_user_account(p_target_user_id UUID)
+RETURNS JSONB AS $$
+DECLARE
+  v_caller_role TEXT;
+BEGIN
+  SELECT role INTO v_caller_role FROM public.profiles WHERE id = auth.uid();
+  IF v_caller_role <> 'admin' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Unauthorized. Only Ministry Administrators can delete user accounts.');
+  END IF;
+
+  IF p_target_user_id = auth.uid() THEN
+    RETURN jsonb_build_object('success', false, 'error', 'You cannot delete your own admin account.');
+  END IF;
+
+  DELETE FROM public.wallets WHERE user_id = p_target_user_id;
+  DELETE FROM public.subscriptions WHERE user_id = p_target_user_id;
+  DELETE FROM public.referrals WHERE referrer_id = p_target_user_id OR referred_user_id = p_target_user_id;
+  DELETE FROM public.withdrawal_requests WHERE user_id = p_target_user_id;
+  DELETE FROM public.wallet_transactions WHERE user_id = p_target_user_id;
+  DELETE FROM public.profiles WHERE id = p_target_user_id;
+
+  DELETE FROM auth.users WHERE id = p_target_user_id;
+
+  RETURN jsonb_build_object('success', true, 'deleted_user_id', p_target_user_id);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
