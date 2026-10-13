@@ -162,13 +162,30 @@ export default function AuthScreen() {
 
     if (mode === 'signup' && referralCodeInput.trim() && supabase) {
       const cleanCode = referralCodeInput.trim().toUpperCase();
-      const { data: refProfile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('referral_code', cleanCode)
-        .maybeSingle();
+      let isValidCode = false;
 
-      if (!refProfile?.id) {
+      try {
+        const { data: verifyRes } = await supabase.rpc('verify_referral_code', { p_code: cleanCode });
+        if (verifyRes?.valid) {
+          isValidCode = true;
+        }
+      } catch {
+        // Fallback
+      }
+
+      if (!isValidCode) {
+        const { data: refProfile } = await supabase
+          .from('profiles')
+          .select('id')
+          .ilike('referral_code', cleanCode)
+          .maybeSingle();
+
+        if (refProfile?.id) {
+          isValidCode = true;
+        }
+      }
+
+      if (!isValidCode) {
         setFeedback({
           type: 'warning',
           title: t(language, 'referral'),

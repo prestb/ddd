@@ -63,6 +63,10 @@ CREATE TRIGGER trg_assign_referral_code
 BEFORE INSERT ON public.profiles
 FOR EACH ROW EXECUTE FUNCTION auto_assign_referral_code();
 
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public can read profiles" ON public.profiles;
+CREATE POLICY "Public can read profiles" ON public.profiles FOR SELECT USING (true);
+
 -- Exception-safe auto-create profiles, wallets and referral links on new user signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
@@ -414,6 +418,7 @@ BEGIN
       'admin_credit_user_referral_wallet',
       'admin_delete_user_account',
       'link_user_referral_code',
+      'verify_referral_code',
       'get_app_setting',
       'set_app_setting'
     )
@@ -422,6 +427,32 @@ BEGIN
     EXECUTE 'DROP FUNCTION IF EXISTS ' || r.func_signature || ' CASCADE';
   END LOOP;
 END $$;
+
+CREATE OR REPLACE FUNCTION verify_referral_code(p_code TEXT)
+RETURNS JSONB AS $$
+DECLARE
+  v_clean_code TEXT;
+  v_referrer_id UUID;
+BEGIN
+  v_clean_code := UPPER(TRIM(p_code));
+  IF v_clean_code IS NULL OR v_clean_code = '' THEN
+    RETURN jsonb_build_object('valid', false);
+  END IF;
+
+  SELECT id INTO v_referrer_id
+  FROM public.profiles
+  WHERE UPPER(TRIM(referral_code)) = v_clean_code
+  LIMIT 1;
+
+  IF v_referrer_id IS NOT NULL THEN
+    RETURN jsonb_build_object('valid', true, 'referrer_id', v_referrer_id);
+  ELSE
+    RETURN jsonb_build_object('valid', false);
+  END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+GRANT EXECUTE ON FUNCTION public.verify_referral_code(TEXT) TO service_role, postgres, authenticated, anon;
 CREATE OR REPLACE FUNCTION get_app_setting(p_key TEXT)
 RETURNS TEXT AS $$
 DECLARE
