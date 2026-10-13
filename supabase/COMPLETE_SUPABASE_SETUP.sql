@@ -401,6 +401,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- Drop any legacy overloaded versions of debit_wallet & purchase_subscription to eliminate PostgreSQL ambiguity
+DROP FUNCTION IF EXISTS public.debit_wallet(UUID, INTEGER, TEXT, TEXT, JSONB);
+
 CREATE OR REPLACE FUNCTION public.debit_wallet(
   p_user_id UUID,
   p_amount INTEGER,
@@ -519,6 +522,9 @@ BEGIN
   RETURN jsonb_build_object('status', 'rewarded', 'amount', v_reward_amount, 'percentage', v_percentage);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP FUNCTION IF EXISTS public.purchase_subscription(UUID, UUID, TEXT);
+DROP FUNCTION IF EXISTS public.purchase_subscription(UUID, UUID, TEXT, TEXT);
 
 CREATE OR REPLACE FUNCTION public.purchase_subscription(
   p_user_id UUID,
