@@ -402,6 +402,70 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+CREATE OR REPLACE FUNCTION fulfill_referral_reward(p_referred_user_id UUID, p_subscription_price_xaf INTEGER DEFAULT 500)
+RETURNS JSONB AS $$
+DECLARE
+  v_referral RECORD;
+  v_wallet_id UUID;
+  v_balance_before INTEGER;
+  v_balance_after INTEGER;
+  v_percentage_str TEXT;
+  v_percentage INTEGER := 10;
+  v_reward_amount INTEGER;
+BEGIN
+  -- Auto-ensure profile exists
+  INSERT INTO public.profiles (id)
+  VALUES (p_referred_user_id)
+  ON CONFLICT (id) DO NOTHING;
+
+  SELECT value INTO v_percentage_str FROM public.app_settings WHERE key = 'referral_percentage';
+  IF v_percentage_str IS NOT NULL AND v_percentage_str ~ '^\d+$' THEN
+    v_percentage := v_percentage_str::INTEGER;
+  END IF;
+
+  v_reward_amount := ROUND((COALESCE(p_subscription_price_xaf, 500) * v_percentage) / 100.0);
+  IF v_reward_amount < 50 THEN
+    v_reward_amount := 50;
+  END IF;
+
+  SELECT * INTO v_referral FROM public.referrals
+  WHERE referred_user_id = p_referred_user_id AND status = 'pending'
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('status', 'no_pending_referral');
+  END IF;
+
+  SELECT id, referral_balance INTO v_wallet_id, v_balance_before
+  FROM public.wallets WHERE user_id = v_referral.referrer_id
+  FOR UPDATE;
+
+  IF v_wallet_id IS NULL THEN
+    INSERT INTO public.wallets (user_id, balance, referral_balance) VALUES (v_referral.referrer_id, 0, 0)
+    RETURNING id, referral_balance INTO v_wallet_id, v_balance_before;
+  END IF;
+
+  v_balance_before := COALESCE(v_balance_before, 0);
+  v_balance_after := v_balance_before + v_reward_amount;
+
+  UPDATE public.wallets SET referral_balance = v_balance_after, updated_at = NOW() WHERE id = v_wallet_id;
+
+  INSERT INTO public.wallet_transactions (
+    wallet_id, user_id, type, amount, balance_before, balance_after, reference, description
+  ) VALUES (
+    v_wallet_id, v_referral.referrer_id, 'referral_credit', v_reward_amount,
+    v_balance_before, v_balance_after, 'ref-' || v_referral.id,
+    v_percentage || '% referral commission on subscription purchase (' || v_reward_amount || ' XAF)'
+  );
+
+  UPDATE public.referrals
+  SET status = 'rewarded', rewarded_at = NOW(), reward_amount_xaf = v_reward_amount
+  WHERE id = v_referral.id;
+
+  RETURN jsonb_build_object('status', 'rewarded', 'amount', v_reward_amount, 'percentage', v_percentage);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 CREATE OR REPLACE FUNCTION public.purchase_subscription(
   p_user_id UUID,
   p_plan_id UUID,
@@ -497,6 +561,9 @@ BEGIN
     jsonb_build_object('idempotency_key', p_idempotency_key, 'plan_name', v_plan_name)
   ) RETURNING id INTO v_sub_tx_id;
 
+  -- Fulfill referral reward
+  PERFORM fulfill_referral_reward(p_user_id, v_price_xaf);
+
   RETURN jsonb_build_object(
     'status', 'successful',
     'subscription_id', v_subscription_id,
@@ -513,70 +580,6 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 GRANT EXECUTE ON FUNCTION public.purchase_subscription(UUID, UUID, TEXT) TO service_role, postgres, authenticated;
 GRANT EXECUTE ON FUNCTION public.debit_wallet(UUID, INTEGER, TEXT, TEXT, JSONB) TO service_role, postgres, authenticated;
-
-CREATE OR REPLACE FUNCTION fulfill_referral_reward(p_referred_user_id UUID, p_subscription_price_xaf INTEGER DEFAULT 500)
-RETURNS JSONB AS $$
-DECLARE
-  v_referral RECORD;
-  v_wallet_id UUID;
-  v_balance_before INTEGER;
-  v_balance_after INTEGER;
-  v_percentage_str TEXT;
-  v_percentage INTEGER := 10;
-  v_reward_amount INTEGER;
-BEGIN
-  -- Auto-ensure profile exists
-  INSERT INTO public.profiles (id)
-  VALUES (p_referred_user_id)
-  ON CONFLICT (id) DO NOTHING;
-
-  SELECT value INTO v_percentage_str FROM public.app_settings WHERE key = 'referral_percentage';
-  IF v_percentage_str IS NOT NULL AND v_percentage_str ~ '^\d+$' THEN
-    v_percentage := v_percentage_str::INTEGER;
-  END IF;
-
-  v_reward_amount := ROUND((COALESCE(p_subscription_price_xaf, 500) * v_percentage) / 100.0);
-  IF v_reward_amount < 50 THEN
-    v_reward_amount := 50;
-  END IF;
-
-  SELECT * INTO v_referral FROM public.referrals
-  WHERE referred_user_id = p_referred_user_id AND status = 'pending'
-  FOR UPDATE;
-
-  IF NOT FOUND THEN
-    RETURN jsonb_build_object('status', 'no_pending_referral');
-  END IF;
-
-  SELECT id, referral_balance INTO v_wallet_id, v_balance_before
-  FROM public.wallets WHERE user_id = v_referral.referrer_id
-  FOR UPDATE;
-
-  IF v_wallet_id IS NULL THEN
-    INSERT INTO public.wallets (user_id, balance, referral_balance) VALUES (v_referral.referrer_id, 0, 0)
-    RETURNING id, referral_balance INTO v_wallet_id, v_balance_before;
-  END IF;
-
-  v_balance_before := COALESCE(v_balance_before, 0);
-  v_balance_after := v_balance_before + v_reward_amount;
-
-  UPDATE public.wallets SET referral_balance = v_balance_after, updated_at = NOW() WHERE id = v_wallet_id;
-
-  INSERT INTO public.wallet_transactions (
-    wallet_id, user_id, type, amount, balance_before, balance_after, reference, description
-  ) VALUES (
-    v_wallet_id, v_referral.referrer_id, 'referral_credit', v_reward_amount,
-    v_balance_before, v_balance_after, 'ref-' || v_referral.id,
-    v_percentage || '% referral commission on subscription purchase (' || v_reward_amount || ' XAF)'
-  );
-
-  UPDATE public.referrals
-  SET status = 'rewarded', rewarded_at = NOW(), reward_amount_xaf = v_reward_amount
-  WHERE id = v_referral.id;
-
-  RETURN jsonb_build_object('status', 'rewarded', 'amount', v_reward_amount, 'percentage', v_percentage);
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION transfer_referral_to_deposit_wallet(p_user_id UUID, p_amount_xaf INTEGER)
 RETURNS JSONB AS $$
@@ -832,5 +835,32 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- 8. Force PostgREST schema cache reload
+CREATE OR REPLACE FUNCTION admin_delete_user_account(p_target_user_id UUID)
+RETURNS JSONB AS $$
+DECLARE
+  v_caller_role TEXT;
+BEGIN
+  SELECT role INTO v_caller_role FROM public.profiles WHERE id = auth.uid();
+  IF v_caller_role <> 'admin' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Unauthorized. Only Ministry Administrators can delete user accounts.');
+  END IF;
+
+  IF p_target_user_id = auth.uid() THEN
+    RETURN jsonb_build_object('success', false, 'error', 'You cannot delete your own admin account.');
+  END IF;
+
+  DELETE FROM public.wallets WHERE user_id = p_target_user_id;
+  DELETE FROM public.subscriptions WHERE user_id = p_target_user_id;
+  DELETE FROM public.referrals WHERE referrer_id = p_target_user_id OR referred_user_id = p_target_user_id;
+  DELETE FROM public.withdrawal_requests WHERE user_id = p_target_user_id;
+  DELETE FROM public.wallet_transactions WHERE user_id = p_target_user_id;
+  DELETE FROM public.profiles WHERE id = p_target_user_id;
+
+  DELETE FROM auth.users WHERE id = p_target_user_id;
+
+  RETURN jsonb_build_object('success', true, 'deleted_user_id', p_target_user_id);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 9. Force PostgREST schema cache reload
 NOTIFY pgrst, 'reload schema';
