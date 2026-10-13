@@ -232,7 +232,10 @@ export default function AuthScreen() {
       setFeedback({
         type: 'info',
         title: t(language, 'authFeedbackCheckEmailTitle'),
-        message: t(language, 'checkEmail'),
+        message:
+          language === 'fr'
+            ? 'Compte créé ! Si la confirmation par e-mail est activée sur votre serveur Supabase, vérifiez votre boîte de réception. Sinon, vous pouvez vous connecter directement.'
+            : 'Account created! If email confirmation is enabled in your Supabase Dashboard, please check your inbox to verify your account before signing in.',
       });
     } else {
       setPassword('');

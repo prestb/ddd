@@ -145,7 +145,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
         ).catch(() => undefined);
       }
 
-      return { needsConfirmation: true, userId: signUpData?.user?.id };
+      const hasSession = Boolean(signUpData?.session);
+      return {
+        needsConfirmation: !hasSession,
+        userId: signUpData?.user?.id,
+        session: signUpData?.session ?? null,
+      };
     },
     resetPassword: async (email, language = 'en') => {
       if (!supabase) return { error: t(language, 'authGenericError') };

@@ -1004,18 +1004,26 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'You cannot delete your own admin account.');
   END IF;
 
-  DELETE FROM public.wallets WHERE user_id = p_target_user_id;
-  DELETE FROM public.subscriptions WHERE user_id = p_target_user_id;
-  DELETE FROM public.referrals WHERE referrer_id = p_target_user_id OR referred_user_id = p_target_user_id;
-  DELETE FROM public.withdrawal_requests WHERE user_id = p_target_user_id;
-  DELETE FROM public.wallet_transactions WHERE user_id = p_target_user_id;
-  DELETE FROM public.profiles WHERE id = p_target_user_id;
+  -- Delete all dependent records from public tables
+  BEGIN
+    DELETE FROM public.wallet_transactions WHERE user_id = p_target_user_id;
+    DELETE FROM public.subscription_transactions WHERE user_id = p_target_user_id;
+    DELETE FROM public.withdrawal_requests WHERE user_id = p_target_user_id;
+    DELETE FROM public.referrals WHERE referrer_id = p_target_user_id OR referred_user_id = p_target_user_id;
+    DELETE FROM public.subscriptions WHERE user_id = p_target_user_id;
+    DELETE FROM public.wallets WHERE user_id = p_target_user_id;
+    DELETE FROM public.newsletter_subscribers WHERE user_id = p_target_user_id;
+    DELETE FROM public.profiles WHERE id = p_target_user_id;
+  EXCEPTION WHEN OTHERS THEN
+    -- Ignore if table missing
+  END;
 
+  -- Delete user from auth.users
   DELETE FROM auth.users WHERE id = p_target_user_id;
 
   RETURN jsonb_build_object('success', true, 'deleted_user_id', p_target_user_id);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth;
 
 CREATE OR REPLACE FUNCTION link_user_referral_code(
   p_user_id UUID,
