@@ -104,18 +104,24 @@ WHERE referral_code IS NULL OR referral_code = '';
 -- 3. Subscription Plans, Subscriptions & Transactions Tables
 CREATE TABLE IF NOT EXISTS public.subscription_plans (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT NOT NULL,
+  name TEXT UNIQUE NOT NULL,
   duration_days INTEGER NOT NULL,
   price_xaf INTEGER NOT NULL,
   is_active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE public.subscription_plans
+ADD CONSTRAINT unique_subscription_plan_name UNIQUE (name);
+
 INSERT INTO public.subscription_plans (name, duration_days, price_xaf, is_active)
 VALUES
   ('Monthly', 30, 500, true),
   ('Annual', 365, 5000, true)
-ON CONFLICT DO NOTHING;
+ON CONFLICT (name) DO UPDATE SET
+  duration_days = EXCLUDED.duration_days,
+  price_xaf = EXCLUDED.price_xaf,
+  is_active = true;
 
 ALTER TABLE public.subscription_plans ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Public can read subscription plans" ON public.subscription_plans;
@@ -468,11 +474,13 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION public.purchase_subscription(
   p_user_id UUID,
-  p_plan_id UUID,
+  p_plan_id UUID DEFAULT NULL,
+  p_plan_name TEXT DEFAULT NULL,
   p_idempotency_key TEXT DEFAULT NULL
 )
 RETURNS JSONB AS $$
 DECLARE
+  v_plan_id UUID := p_plan_id;
   v_plan_name TEXT;
   v_duration_days INTEGER;
   v_price_xaf INTEGER;
@@ -488,20 +496,39 @@ DECLARE
   v_expires_at TIMESTAMPTZ;
   v_sub_tx_id UUID;
 BEGIN
-  IF p_user_id IS NULL OR p_plan_id IS NULL THEN
-    RAISE EXCEPTION 'User ID and Plan ID are required for subscription purchase.';
+  IF p_user_id IS NULL THEN
+    RAISE EXCEPTION 'User ID is required for subscription purchase.';
   END IF;
 
   -- Auto-ensure profile exists
   INSERT INTO public.profiles (id) VALUES (p_user_id) ON CONFLICT (id) DO NOTHING;
 
-  -- Read plan details
-  SELECT name, duration_days, price_xaf, is_active
-  INTO v_plan_name, v_duration_days, v_price_xaf, v_is_active
-  FROM public.subscription_plans
-  WHERE id = p_plan_id;
+  -- Ensure default plans exist in subscription_plans
+  INSERT INTO public.subscription_plans (name, duration_days, price_xaf, is_active)
+  VALUES ('Monthly', 30, 500, true), ('Annual', 365, 5000, true)
+  ON CONFLICT DO NOTHING;
 
-  IF v_plan_name IS NULL OR NOT v_is_active THEN
+  -- Lookup plan by ID or Name
+  IF v_plan_id IS NOT NULL THEN
+    SELECT id, name, duration_days, price_xaf, is_active
+    INTO v_plan_id, v_plan_name, v_duration_days, v_price_xaf, v_is_active
+    FROM public.subscription_plans WHERE id = v_plan_id;
+  END IF;
+
+  IF v_plan_name IS NULL AND p_plan_name IS NOT NULL THEN
+    SELECT id, name, duration_days, price_xaf, is_active
+    INTO v_plan_id, v_plan_name, v_duration_days, v_price_xaf, v_is_active
+    FROM public.subscription_plans WHERE ILIKE(name, p_plan_name) AND is_active = true LIMIT 1;
+  END IF;
+
+  -- Fallback to Annual if plan still not found
+  IF v_plan_name IS NULL THEN
+    SELECT id, name, duration_days, price_xaf, is_active
+    INTO v_plan_id, v_plan_name, v_duration_days, v_price_xaf, v_is_active
+    FROM public.subscription_plans WHERE ILIKE(name, 'Annual') LIMIT 1;
+  END IF;
+
+  IF v_plan_name IS NULL THEN
     RAISE EXCEPTION 'Selected subscription plan is invalid or inactive.';
   END IF;
 
@@ -526,7 +553,7 @@ BEGIN
     p_amount := v_price_xaf,
     p_reference := COALESCE(p_idempotency_key, 'sub-purchase-' || gen_random_uuid()::text),
     p_description := 'Daily Dew ' || v_plan_name || ' Membership Purchase',
-    p_metadata := jsonb_build_object('plan_id', p_plan_id, 'plan_name', v_plan_name)
+    p_metadata := jsonb_build_object('plan_id', v_plan_id, 'plan_name', v_plan_name)
   );
 
   v_wallet_tx_id := (v_debit_result->>'transaction_id')::uuid;
@@ -543,7 +570,7 @@ BEGIN
   INSERT INTO public.subscriptions (
     user_id, plan_id, status, started_at, expires_at, auto_renew, updated_at
   ) VALUES (
-    p_user_id, p_plan_id, 'active', v_starts_at, v_expires_at, true, NOW()
+    p_user_id, v_plan_id, 'active', v_starts_at, v_expires_at, true, NOW()
   )
   ON CONFLICT (user_id) DO UPDATE SET
     plan_id = EXCLUDED.plan_id,
@@ -557,7 +584,7 @@ BEGIN
   INSERT INTO public.subscription_transactions (
     subscription_id, user_id, plan_id, type, amount, currency, wallet_transaction_id, metadata
   ) VALUES (
-    v_subscription_id, p_user_id, p_plan_id, 'purchase', v_price_xaf, 'XAF', v_wallet_tx_id,
+    v_subscription_id, p_user_id, v_plan_id, 'purchase', v_price_xaf, 'XAF', v_wallet_tx_id,
     jsonb_build_object('idempotency_key', p_idempotency_key, 'plan_name', v_plan_name)
   ) RETURNING id INTO v_sub_tx_id;
 

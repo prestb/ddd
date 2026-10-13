@@ -124,7 +124,7 @@ export default function MembershipScreen() {
       let expiryIso: string | null = null;
       let rawErrorMsg: string | null = null;
 
-      // 1. Fetch target plan ID from subscription_plans table
+      // 1. Fetch target plan ID or invoke purchase_subscription directly with plan name
       const { data: planRow } = await supabase
         .from('subscription_plans')
         .select('id, price_xaf')
@@ -132,22 +132,20 @@ export default function MembershipScreen() {
         .eq('is_active', true)
         .maybeSingle();
 
-      if (planRow?.id) {
-        // 2. Execute purchase_subscription RPC directly
-        const idempotencyKey = `purchase-${session.user.id}-${selectedPlan}-${Date.now()}`;
-        const { data: rpcData, error: rpcErr } = await supabase.rpc('purchase_subscription', {
-          p_user_id: session.user.id,
-          p_plan_id: planRow.id,
-          p_idempotency_key: idempotencyKey,
-        });
+      const idempotencyKey = `purchase-${session.user.id}-${selectedPlan}-${Date.now()}`;
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('purchase_subscription', {
+        p_user_id: session.user.id,
+        p_plan_id: planRow?.id ?? null,
+        p_plan_name: targetPlanName,
+        p_idempotency_key: idempotencyKey,
+      });
 
-        if (!rpcErr && rpcData?.status === 'successful') {
-          purchaseSuccess = true;
-          remainingBal = rpcData.remaining_balance ?? balance - planPrice;
-          expiryIso = rpcData.expires_at ?? null;
-        } else {
-          rawErrorMsg = rpcErr?.message ?? rpcData?.error ?? null;
-        }
+      if (!rpcErr && rpcData?.status === 'successful') {
+        purchaseSuccess = true;
+        remainingBal = rpcData.remaining_balance ?? balance - planPrice;
+        expiryIso = rpcData.expires_at ?? null;
+      } else {
+        rawErrorMsg = rpcErr?.message ?? rpcData?.error ?? null;
       }
 
       // 3. Edge Function fallback if RPC direct call didn't succeed
