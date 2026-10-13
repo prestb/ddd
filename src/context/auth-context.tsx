@@ -11,7 +11,7 @@ type AuthContextValue = {
   session: Session | null;
   loading: boolean;
   signIn: (email: string, password: string, language?: AppLanguage) => Promise<{ error?: string; needsConfirmation?: boolean }>;
-  signUp: (email: string, password: string, language?: AppLanguage) => Promise<{ error?: string; needsConfirmation?: boolean }>;
+  signUp: (email: string, password: string, language?: AppLanguage, referralCode?: string) => Promise<{ error?: string; needsConfirmation?: boolean }>;
   resetPassword: (email: string, language?: AppLanguage) => Promise<{ error?: string }>;
   updatePassword: (password: string, language?: AppLanguage) => Promise<{ error?: string }>;
   changePassword: (currentPassword: string, newPassword: string, language?: AppLanguage) => Promise<{ error?: string }>;
@@ -96,6 +96,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
       if (nextSession) {
         recordAnalyticsEvent('app_open', {}, nextSession.user.id).catch(() => undefined);
         if (nextSession.user.email) client.from('newsletter_subscribers').upsert({ user_id: nextSession.user.id, email: nextSession.user.email }, { onConflict: 'user_id' }).then(() => undefined);
+        const refCodeMeta = nextSession.user.user_metadata?.referral_code;
+        if (refCodeMeta) {
+          Promise.resolve(
+            client.rpc('link_user_referral_code', {
+              p_user_id: nextSession.user.id,
+              p_referral_code: String(refCodeMeta),
+            })
+          ).catch(() => undefined);
+        }
       }
     });
     return () => listener.subscription.unsubscribe();
@@ -109,14 +118,16 @@ export function AuthProvider({ children }: PropsWithChildren) {
       const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
       return error ? { error: mapAuthError(error, 'signin', language) } : {};
     },
-    signUp: async (email, password, language = 'en') => {
+    signUp: async (email, password, language = 'en', referralCode?: string) => {
       if (!supabase) return { error: t(language, 'authGenericError') };
       const cleanEmail = email.trim();
+      const cleanRefCode = referralCode ? referralCode.trim().toUpperCase() : undefined;
       const { error } = await supabase.auth.signUp({
         email: cleanEmail,
         password,
         options: {
           emailRedirectTo: 'devotionalapp://auth',
+          data: cleanRefCode ? { referral_code: cleanRefCode } : undefined,
         },
       });
       if (error) {

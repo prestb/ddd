@@ -63,24 +63,44 @@ CREATE TRIGGER trg_assign_referral_code
 BEFORE INSERT ON public.profiles
 FOR EACH ROW EXECUTE FUNCTION auto_assign_referral_code();
 
--- Exception-safe auto-create profiles and wallets on new user signup
+-- Exception-safe auto-create profiles, wallets and referral links on new user signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+  v_ref_code TEXT;
+  v_referrer_id UUID;
 BEGIN
+  -- 1. Create Profile
   BEGIN
     INSERT INTO public.profiles (id)
     VALUES (NEW.id)
     ON CONFLICT (id) DO NOTHING;
   EXCEPTION WHEN OTHERS THEN
-    -- Prevent trigger error from blocking user creation in auth.users
+    -- Prevent trigger error from blocking user creation
   END;
 
+  -- 2. Create Wallet
   BEGIN
     INSERT INTO public.wallets (user_id, balance, referral_balance)
     VALUES (NEW.id, 0, 0)
     ON CONFLICT (user_id) DO NOTHING;
   EXCEPTION WHEN OTHERS THEN
-    -- Prevent trigger error from blocking user creation in auth.users
+    -- Prevent trigger error from blocking user creation
+  END;
+
+  -- 3. Process Referral Code from user metadata
+  BEGIN
+    v_ref_code := UPPER(TRIM(NEW.raw_user_meta_data->>'referral_code'));
+    IF v_ref_code IS NOT NULL AND v_ref_code <> '' THEN
+      SELECT id INTO v_referrer_id FROM public.profiles WHERE referral_code = v_ref_code LIMIT 1;
+      IF v_referrer_id IS NOT NULL AND v_referrer_id <> NEW.id THEN
+        INSERT INTO public.referrals (referrer_id, referred_user_id, referral_code, status)
+        VALUES (v_referrer_id, NEW.id, v_ref_code, 'pending')
+        ON CONFLICT (referred_user_id) DO NOTHING;
+      END IF;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    -- Prevent trigger error from blocking user creation
   END;
 
   RETURN NEW;
@@ -393,6 +413,7 @@ BEGIN
       'admin_process_withdrawal_request',
       'admin_credit_user_referral_wallet',
       'admin_delete_user_account',
+      'link_user_referral_code',
       'get_app_setting',
       'set_app_setting'
     )
@@ -962,6 +983,41 @@ BEGIN
   DELETE FROM auth.users WHERE id = p_target_user_id;
 
   RETURN jsonb_build_object('success', true, 'deleted_user_id', p_target_user_id);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION link_user_referral_code(
+  p_user_id UUID,
+  p_referral_code TEXT
+)
+RETURNS JSONB AS $$
+DECLARE
+  v_clean_code TEXT;
+  v_referrer_id UUID;
+BEGIN
+  v_clean_code := UPPER(TRIM(p_referral_code));
+  IF v_clean_code IS NULL OR v_clean_code = '' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Invalid referral code.');
+  END IF;
+
+  -- Ensure profile exists
+  INSERT INTO public.profiles (id) VALUES (p_user_id) ON CONFLICT (id) DO NOTHING;
+
+  -- Look up referrer
+  SELECT id INTO v_referrer_id FROM public.profiles WHERE referral_code = v_clean_code LIMIT 1;
+  IF v_referrer_id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Referrer not found.');
+  END IF;
+
+  IF v_referrer_id = p_user_id THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Cannot refer yourself.');
+  END IF;
+
+  INSERT INTO public.referrals (referrer_id, referred_user_id, referral_code, status)
+  VALUES (v_referrer_id, p_user_id, v_clean_code, 'pending')
+  ON CONFLICT (referred_user_id) DO NOTHING;
+
+  RETURN jsonb_build_object('success', true, 'referrer_id', v_referrer_id);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 

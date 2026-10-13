@@ -161,32 +161,24 @@ export default function AuthScreen() {
     }
     setBusy(true);
     setFeedback(null);
-    const result = mode === 'signin' ? await signIn(email, password, language) : await signUp(email, password, language);
+    const result = mode === 'signin'
+      ? await signIn(email, password, language)
+      : await signUp(email, password, language, referralCodeInput);
     setBusy(false);
 
     if (!result.error && mode === 'signup' && referralCodeInput.trim() && supabase) {
       const cleanCode = referralCodeInput.trim().toUpperCase();
       try {
-        const { data: referrer } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('referral_code', cleanCode)
-          .maybeSingle();
-
-        if (referrer?.id) {
-          const { data: authUserData } = await supabase.auth.getUser();
-          const newUserId = authUserData?.user?.id;
-          if (newUserId && newUserId !== referrer.id) {
-            await supabase.from('referrals').insert({
-              referrer_id: referrer.id,
-              referred_user_id: newUserId,
-              referral_code: cleanCode,
-              status: 'pending',
-            });
-          }
+        const { data: authUserData } = await supabase.auth.getUser();
+        const newUserId = authUserData?.user?.id;
+        if (newUserId) {
+          await supabase.rpc('link_user_referral_code', {
+            p_user_id: newUserId,
+            p_referral_code: cleanCode,
+          });
         }
       } catch {
-        // Ignore referral errors
+        // Referral link handled via raw_user_meta_data trigger
       }
     }
 
