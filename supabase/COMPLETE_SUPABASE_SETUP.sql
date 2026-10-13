@@ -175,13 +175,29 @@ CREATE TABLE IF NOT EXISTS public.wallet_transactions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Drop old check constraint and re-add with all allowed transaction types
+-- Drop old check constraint
 ALTER TABLE public.wallet_transactions
 DROP CONSTRAINT IF EXISTS wallet_transactions_type_check;
 
+-- Normalize any legacy or unrecognized transaction types in existing rows to 'deposit'
+UPDATE public.wallet_transactions
+SET type = 'deposit'
+WHERE type IS NULL OR LOWER(type) NOT IN (
+  'deposit',
+  'credit',
+  'subscription_payment',
+  'donation',
+  'refund',
+  'referral_credit',
+  'transfer_to_deposit',
+  'withdrawal_request',
+  'withdrawal_declined_refund'
+);
+
+-- Add updated check constraint allowing all valid transaction types
 ALTER TABLE public.wallet_transactions
 ADD CONSTRAINT wallet_transactions_type_check
-CHECK (type IN (
+CHECK (LOWER(type) IN (
   'deposit',
   'credit',
   'subscription_payment',
