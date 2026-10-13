@@ -994,6 +994,7 @@ RETURNS JSONB AS $$
 DECLARE
   v_clean_code TEXT;
   v_referrer_id UUID;
+  v_ref_id UUID;
 BEGIN
   v_clean_code := UPPER(TRIM(p_referral_code));
   IF v_clean_code IS NULL OR v_clean_code = '' THEN
@@ -1004,7 +1005,7 @@ BEGIN
   INSERT INTO public.profiles (id) VALUES (p_user_id) ON CONFLICT (id) DO NOTHING;
 
   -- Look up referrer
-  SELECT id INTO v_referrer_id FROM public.profiles WHERE UPPER(referral_code) = v_clean_code LIMIT 1;
+  SELECT id INTO v_referrer_id FROM public.profiles WHERE UPPER(TRIM(referral_code)) = v_clean_code LIMIT 1;
   IF v_referrer_id IS NULL THEN
     RETURN jsonb_build_object('success', false, 'error', 'Referrer not found.');
   END IF;
@@ -1015,9 +1016,17 @@ BEGIN
 
   INSERT INTO public.referrals (referrer_id, referred_user_id, referral_code, status)
   VALUES (v_referrer_id, p_user_id, v_clean_code, 'pending')
-  ON CONFLICT (referred_user_id) DO NOTHING;
+  ON CONFLICT (referred_user_id) DO UPDATE SET
+    referrer_id = EXCLUDED.referrer_id,
+    referral_code = EXCLUDED.referral_code,
+    created_at = NOW()
+  RETURNING id INTO v_ref_id;
 
-  RETURN jsonb_build_object('success', true, 'referrer_id', v_referrer_id);
+  RETURN jsonb_build_object('success', true, 'referral_id', v_ref_id, 'referrer_id', v_referrer_id);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+GRANT EXECUTE ON FUNCTION public.link_user_referral_code(UUID, TEXT) TO service_role, postgres, authenticated, anon;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 

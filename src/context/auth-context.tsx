@@ -10,8 +10,8 @@ const REDIRECT_RECOVERY_URL = 'devotionalapp://reset-password';
 type AuthContextValue = {
   session: Session | null;
   loading: boolean;
-  signIn: (email: string, password: string, language?: AppLanguage) => Promise<{ error?: string; needsConfirmation?: boolean }>;
-  signUp: (email: string, password: string, language?: AppLanguage, referralCode?: string) => Promise<{ error?: string; needsConfirmation?: boolean }>;
+  signIn: (email: string, password: string, language?: AppLanguage) => Promise<{ error?: string; needsConfirmation?: boolean; userId?: string }>;
+  signUp: (email: string, password: string, language?: AppLanguage, referralCode?: string) => Promise<{ error?: string; needsConfirmation?: boolean; userId?: string }>;
   resetPassword: (email: string, language?: AppLanguage) => Promise<{ error?: string }>;
   updatePassword: (password: string, language?: AppLanguage) => Promise<{ error?: string }>;
   changePassword: (currentPassword: string, newPassword: string, language?: AppLanguage) => Promise<{ error?: string }>;
@@ -145,7 +145,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         ).catch(() => undefined);
       }
 
-      return { needsConfirmation: true };
+      return { needsConfirmation: true, userId: signUpData?.user?.id };
     },
     resetPassword: async (email, language = 'en') => {
       if (!supabase) return { error: t(language, 'authGenericError') };

@@ -159,6 +159,25 @@ export default function AuthScreen() {
       });
       return;
     }
+
+    if (mode === 'signup' && referralCodeInput.trim() && supabase) {
+      const cleanCode = referralCodeInput.trim().toUpperCase();
+      const { data: refProfile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('referral_code', cleanCode)
+        .maybeSingle();
+
+      if (!refProfile?.id) {
+        setFeedback({
+          type: 'warning',
+          title: t(language, 'referral'),
+          message: t(language, 'invalidReferralCode'),
+        });
+        return;
+      }
+    }
+
     setBusy(true);
     setFeedback(null);
     const result = mode === 'signin'
@@ -168,17 +187,16 @@ export default function AuthScreen() {
 
     if (!result.error && mode === 'signup' && referralCodeInput.trim() && supabase) {
       const cleanCode = referralCodeInput.trim().toUpperCase();
-      try {
-        const { data: authUserData } = await supabase.auth.getUser();
-        const newUserId = authUserData?.user?.id;
-        if (newUserId) {
+      const newUserId = result.userId;
+      if (newUserId) {
+        try {
           await supabase.rpc('link_user_referral_code', {
             p_user_id: newUserId,
             p_referral_code: cleanCode,
           });
+        } catch {
+          // Handled via raw_user_meta_data trigger
         }
-      } catch {
-        // Referral link handled via raw_user_meta_data trigger
       }
     }
 
