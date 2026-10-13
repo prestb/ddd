@@ -5,6 +5,7 @@ import { useRef, useState } from 'react';
 import { Modal, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
 import { DewDesign } from '@/constants/design';
+import { t } from '@/lib/i18n';
 
 export type CardBackground =
   | 'forest'
@@ -185,7 +186,7 @@ export default function ShareCardGenerator({
             <Text style={[styles.headerTitle, isDark && styles.darkInk]}>
               {language === 'fr' ? 'Créer une Carte Visuale' : 'Share Graphic Card'}
             </Text>
-            <Pressable onPress={onClose} accessibilityLabel="Close card generator">
+            <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel={t(language, 'closeCardGenerator')}>
               <AppIcon name="xmark.circle.fill" size={22} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />
             </Pressable>
           </View>
@@ -208,7 +209,7 @@ export default function ShareCardGenerator({
             <Text style={[styles.cardBody, { color: themeStyle.text }]}>{getContentText()}</Text>
             <View style={styles.cardFooter}>
               <Text style={[styles.brandMark, { color: themeStyle.accent }]}>DAILY DEW DEVOTIONAL</Text>
-              <Text style={[styles.brandTagline, { color: themeStyle.badgeText }]}>A DEVOTIONAL FOR THE STRANGE BREEDS</Text>
+              <Text style={[styles.brandTagline, { color: themeStyle.badgeText }]}>OUR WEAPON OF PERFECTION</Text>
             </View>
           </View>
 

@@ -3,6 +3,7 @@ import * as Speech from 'expo-speech';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { DewDesign } from '@/constants/design';
+import { t } from '@/lib/i18n';
 
 interface AudioPlayerDockProps {
   title: string;
@@ -54,6 +55,10 @@ export default function AudioPlayerDock({ title, textToSpeak, isDark, language }
   };
 
   const ambientLabel = ambient === 'none'
+    ? (language === 'fr' ? 'SANS FOND' : 'OFF')
+    : ambient === 'piano'
+      ? (language === 'fr' ? 'PIANO' : 'PIANO')
+      : (language === 'fr' ? 'PLUIE' : 'RAIN');
 
   return (
     <View style={[styles.dock, isDark && styles.darkDock, DewDesign.shadows.floating]}>
@@ -72,15 +77,19 @@ export default function AudioPlayerDock({ title, textToSpeak, isDark, language }
       </View>
 
       <View style={styles.controlsRow}>
-        <Pressable onPress={cycleAmbient} style={[styles.pillBtn, isDark && styles.darkPillBtn]}>
+        <Pressable onPress={cycleAmbient} style={[styles.pillBtn, isDark && styles.darkPillBtn]} accessibilityRole="button">
           <Text style={[styles.pillText, isDark && styles.darkInk]}>{ambientLabel}</Text>
         </Pressable>
 
-        <Pressable onPress={cycleSpeed} style={[styles.pillBtn, isDark && styles.darkPillBtn]}>
+        <Pressable onPress={cycleSpeed} style={[styles.pillBtn, isDark && styles.darkPillBtn]} accessibilityRole="button">
           <Text style={[styles.pillText, isDark && styles.darkInk]}>{speechRate}x</Text>
         </Pressable>
 
-        <Pressable onPress={togglePlay} style={styles.playBtn} accessibilityLabel={isPlaying ? 'Pause meditation' : 'Play meditation'}>
+        <Pressable
+          onPress={togglePlay}
+          style={styles.playBtn}
+          accessibilityRole="button"
+          accessibilityLabel={isPlaying ? t(language, 'pauseMeditation') : t(language, 'playMeditation')}>
           <AppIcon name={isPlaying ? 'pause.fill' : 'play.fill'} size={20} tintColor="#FFFFFF" />
         </Pressable>
       </View>

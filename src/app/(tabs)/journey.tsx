@@ -48,18 +48,23 @@ export default function JourneyScreen() {
             <Text style={[styles.title, isDark && styles.darkInk]}>{t(language, 'journey')}</Text>
             <Text style={[styles.subtitle, isDark && styles.darkBody]}>{t(language, 'noticeGrowth')}</Text>
 
+            {/* Current Edition Progress Hero Card */}
             <View style={styles.hero}>
-              <View>
-                <Text style={styles.heroLabel}>{edition ? `${edition.title.toUpperCase()} · ${edition.month}/${edition.year}` : 'CURRENT EDITION'}</Text>
-                <Text style={styles.heroValue}>{completedDays.length} days completed</Text>
-                <Text style={styles.heroMeta}>A steady step is still a step.</Text>
+              <View style={styles.heroInfo}>
+                <Text style={styles.heroLabel}>
+                  {edition ? `${edition.title.toUpperCase()} · ${edition.month}/${edition.year}` : t(language, 'currentEditionLabel')}
+                </Text>
+                <Text style={styles.heroValue}>
+                  {`${completedDays.length} ${completedDays.length === 1 ? t(language, 'dayCompletedSuffix') : t(language, 'daysCompletedSuffix')}`}
+                </Text>
+                <Text style={styles.heroMeta}>{t(language, 'aSteadyStep')}</Text>
               </View>
               <View style={styles.progressCircle}>
                 <Text style={styles.progressValue}>{progress}%</Text>
               </View>
             </View>
 
-            {/* Spiritual Milestones Badges */}
+            {/* Spiritual Growth Milestones Badges */}
             <SpiritualMilestones
               completedDaysCount={completedDays.length}
               reflectionsCount={notesCount}
@@ -69,9 +74,12 @@ export default function JourneyScreen() {
               isDark={isDark}
             />
 
+            {/* Month Calendar Grid */}
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{t(language, 'yourMonth')}</Text>
-              <Text style={[styles.sectionMeta, isDark && styles.darkBody]}>{completedDays.length} of {devotions.length}</Text>
+              <Text style={[styles.sectionMeta, isDark && styles.darkBody]}>
+                {`${completedDays.length} / ${devotions.length}`}
+              </Text>
             </View>
             <View style={[styles.calendar, isDark && styles.darkCard]}>
               {days.map((day) => {
@@ -80,30 +88,50 @@ export default function JourneyScreen() {
                 return (
                   <Pressable
                     key={day}
-                    accessibilityLabel={`Open day ${day + 1}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${t(language, 'openDayLabel')} ${day + 1}`}
                     onPress={() => router.push({ pathname: '/devotional', params: { day: String(day) } })}
                     style={[styles.day, isDark && styles.darkDay, complete && styles.dayComplete, bookmarked && !complete && styles.dayBookmarked]}>
-                    {complete ? <SymbolView name="checkmark" size={13} tintColor="#FFFFFF" /> : <Text style={[styles.dayText, bookmarked && styles.dayTextBookmarked]}>{day + 1}</Text>}
+                    {complete ? (
+                      <SymbolView name="checkmark" size={13} tintColor="#FFFFFF" />
+                    ) : (
+                      <Text style={[styles.dayText, isDark && styles.darkDayText, bookmarked && styles.dayTextBookmarked]}>
+                        {day + 1}
+                      </Text>
+                    )}
                   </Pressable>
                 );
               })}
             </View>
 
+            {/* Saved Content Section */}
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{t(language, 'savedWithIntention')}</Text>
             </View>
             <View style={styles.statsRow}>
-              <Pressable style={[styles.stat, isDark && styles.darkCard]} onPress={() => setSavedFilter('bookmarks')}>
+              <Pressable
+                style={[styles.stat, isDark && styles.darkCard]}
+                onPress={() => setSavedFilter('bookmarks')}
+                accessibilityRole="button"
+                accessibilityLabel={t(language, 'bookmarks')}>
                 <SymbolView name="bookmark.fill" size={20} tintColor={DewDesign.colors.terracotta} />
                 <Text style={[styles.statValue, isDark && styles.darkInk]}>{bookmarks.length}</Text>
                 <Text style={[styles.statLabel, isDark && styles.darkMuted]}>{t(language, 'bookmarks')}</Text>
               </Pressable>
-              <Pressable style={[styles.stat, isDark && styles.darkCard]} onPress={() => setSavedFilter('reflections')}>
+              <Pressable
+                style={[styles.stat, isDark && styles.darkCard]}
+                onPress={() => setSavedFilter('reflections')}
+                accessibilityRole="button"
+                accessibilityLabel={t(language, 'reflections')}>
                 <SymbolView name="pencil.line" size={20} tintColor={DewDesign.colors.forest} />
                 <Text style={[styles.statValue, isDark && styles.darkInk]}>{notesCount}</Text>
                 <Text style={[styles.statLabel, isDark && styles.darkMuted]}>{t(language, 'reflections')}</Text>
               </Pressable>
-              <Pressable style={[styles.stat, isDark && styles.darkCard]} onPress={() => setSavedFilter('prayers')}>
+              <Pressable
+                style={[styles.stat, isDark && styles.darkCard]}
+                onPress={() => setSavedFilter('prayers')}
+                accessibilityRole="button"
+                accessibilityLabel={t(language, 'prayers')}>
                 <SymbolView name="hands.sparkles.fill" size={20} tintColor={DewDesign.colors.forest} />
                 <Text style={[styles.statValue, isDark && styles.darkInk]}>{prayersCount}</Text>
                 <Text style={[styles.statLabel, isDark && styles.darkMuted]}>{t(language, 'prayers')}</Text>
@@ -112,7 +140,9 @@ export default function JourneyScreen() {
 
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, isDark && styles.darkInk]}>{t(language, 'savedMoments')}</Text>
-              <Text style={[styles.sectionMeta, isDark && styles.darkBody]}>{savedDays.length} saved</Text>
+              <Text style={[styles.sectionMeta, isDark && styles.darkBody]}>
+                {`${savedDays.length} ${t(language, 'savedCountMeta')}`}
+              </Text>
             </View>
             <View style={styles.filterRow}>
               {([
@@ -120,8 +150,16 @@ export default function JourneyScreen() {
                 ['reflections', t(language, 'reflections')],
                 ['prayers', t(language, 'prayers')],
               ] as const).map(([filter, label]) => (
-                <Pressable key={filter} accessibilityRole="button" onPress={() => setSavedFilter(filter)} style={[styles.filter, isDark && styles.darkCard, savedFilter === filter && styles.filterActive]}>
-                  <Text numberOfLines={1} style={[styles.filterText, isDark && styles.darkInk, savedFilter === filter && styles.filterTextActive]}>{label}</Text>
+                <Pressable
+                  key={filter}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: savedFilter === filter }}
+                  accessibilityLabel={label}
+                  onPress={() => setSavedFilter(filter)}
+                  style={[styles.filter, isDark && styles.darkCard, savedFilter === filter && styles.filterActive]}>
+                  <Text numberOfLines={1} style={[styles.filterText, isDark && styles.darkInk, savedFilter === filter && styles.filterTextActive]}>
+                    {label}
+                  </Text>
                 </Pressable>
               ))}
             </View>
@@ -136,29 +174,37 @@ export default function JourneyScreen() {
                 const devotion = devotions[day];
                 if (!devotion) return null;
                 const localized = localizeDevotion(devotion, day, language);
+                if (!localized) return null;
                 const note = savedFilter === 'reflections' ? reflections[day] : savedFilter === 'prayers' ? prayers[day] : null;
                 const answered = answeredPrayers.includes(day);
                 return (
-                  <Pressable key={`${savedFilter}-${day}`} onPress={() => router.push({ pathname: '/devotional', params: { day: String(day) } })} style={[styles.savedEntry, isDark && styles.darkSavedEntry]}>
+                  <Pressable
+                    key={`${savedFilter}-${day}`}
+                    onPress={() => router.push({ pathname: '/devotional', params: { day: String(day) } })}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Day ${day + 1}: ${localized.title}`}
+                    style={[styles.savedEntry, isDark && styles.darkSavedEntry]}>
                     <View style={[styles.savedDay, isDark && styles.darkSavedDay]}>
                       <Text style={[styles.savedDayText, isDark && styles.darkInk]}>{day + 1}</Text>
                     </View>
                     <View style={styles.savedCopy}>
                       <Text style={[styles.savedTitle, isDark && styles.darkInk]} numberOfLines={1}>{localized.title}</Text>
                       <Text style={[styles.savedMeta, isDark && styles.darkMuted]} numberOfLines={2}>
-                        {answered && savedFilter === 'prayers' ? (language === 'fr' ? 'Prière exaucée' : 'Answered prayer') : note || localized.scripture}
+                        {answered && savedFilter === 'prayers' ? t(language, 'answeredPrayerBadge') : note || localized.scripture}
                       </Text>
                     </View>
                     {savedFilter === 'prayers' ? (
                       <Pressable
                         accessibilityRole="button"
-                        accessibilityLabel={answered ? 'Mark prayer as active' : 'Mark prayer as answered'}
+                        accessibilityLabel={answered ? t(language, 'markPrayerActive') : t(language, 'markPrayerAnswered')}
                         onPress={() => toggleAnsweredPrayer(day)}
                         hitSlop={8}
                         style={[styles.answeredButton, answered && styles.answeredButtonActive]}>
                         <SymbolView name={answered ? 'checkmark' : 'checkmark.circle'} size={16} tintColor={answered ? '#FFFFFF' : DewDesign.colors.forest} />
                       </Pressable>
-                    ) : <SymbolView name="chevron.right" size={16} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />}
+                    ) : (
+                      <SymbolView name="chevron.right" size={16} tintColor={isDark ? DewDesign.colors.darkMuted : DewDesign.colors.muted} />
+                    )}
                   </Pressable>
                 );
               })}
@@ -184,6 +230,7 @@ const styles = StyleSheet.create({
   title: { color: DewDesign.colors.ink, fontFamily: 'serif', fontSize: 35, fontWeight: '700', marginTop: 5 },
   subtitle: { color: DewDesign.colors.body, fontSize: 14, marginTop: 5, marginBottom: 22 },
   hero: { backgroundColor: DewDesign.colors.forest, borderRadius: DewDesign.radius.feature, padding: 19, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  heroInfo: { flex: 1, marginRight: 12 },
   heroLabel: { color: '#D8E3D4', fontSize: 10, fontWeight: '900', letterSpacing: 1.2 },
   heroValue: { color: '#FFFFFF', fontFamily: 'serif', fontSize: 25, fontWeight: '700', marginTop: 8 },
   heroMeta: { color: '#D8E3D4', fontSize: 12, marginTop: 5 },
@@ -198,6 +245,7 @@ const styles = StyleSheet.create({
   dayComplete: { backgroundColor: DewDesign.colors.forest },
   dayBookmarked: { borderWidth: 2, borderColor: DewDesign.colors.terracotta },
   dayText: { color: DewDesign.colors.body, fontSize: 12, fontWeight: '800' },
+  darkDayText: { color: DewDesign.colors.darkInk },
   dayTextBookmarked: { color: DewDesign.colors.terracotta },
   statsRow: { flexDirection: 'row', gap: 10 },
   stat: { flex: 1, backgroundColor: DewDesign.colors.surface, borderRadius: 15, padding: 14, minHeight: 112 },
