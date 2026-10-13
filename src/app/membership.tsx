@@ -88,7 +88,7 @@ export default function MembershipScreen() {
   }, [session, language]);
 
   const handlePurchaseSubscription = async () => {
-    if (!session) {
+    if (!session || !supabase) {
       router.push('/auth');
       return;
     }
@@ -97,34 +97,91 @@ export default function MembershipScreen() {
     setMessage(null);
 
     const targetPlanName = selectedPlan === 'annual' ? 'Annual' : 'Monthly';
+    const planPrice = selectedPlan === 'annual' ? 5000 : 500;
+
+    // Client-side instant balance check
+    if (balance < planPrice) {
+      setBusy(false);
+      Alert.alert(
+        t(language, 'membership'),
+        language === 'fr'
+          ? `Solde du compte insuffisant (${balance.toLocaleString()} XAF). Le plan ${targetPlanName} coûte ${planPrice.toLocaleString()} XAF. Veuillez recharger votre solde.`
+          : `Your account balance (${balance.toLocaleString()} XAF) is insufficient for the ${targetPlanName} plan (${planPrice.toLocaleString()} XAF). Please tap Add Funds to top up.`,
+        [
+          { text: t(language, 'cancel'), style: 'cancel' },
+          {
+            text: t(language, 'addFunds'),
+            onPress: () => router.push((session ? '/add-funds' : '/auth') as any),
+          },
+        ]
+      );
+      return;
+    }
 
     try {
-      if (!supabase) {
-        throw new Error('Supabase client is unavailable.');
+      let purchaseSuccess = false;
+      let remainingBal = balance;
+      let expiryIso: string | null = null;
+      let rawErrorMsg: string | null = null;
+
+      // 1. Fetch target plan ID from subscription_plans table
+      const { data: planRow } = await supabase
+        .from('subscription_plans')
+        .select('id, price_xaf')
+        .ilike('name', targetPlanName)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (planRow?.id) {
+        // 2. Execute purchase_subscription RPC directly
+        const idempotencyKey = `purchase-${session.user.id}-${selectedPlan}-${Date.now()}`;
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('purchase_subscription', {
+          p_user_id: session.user.id,
+          p_plan_id: planRow.id,
+          p_idempotency_key: idempotencyKey,
+        });
+
+        if (!rpcErr && rpcData?.status === 'successful') {
+          purchaseSuccess = true;
+          remainingBal = rpcData.remaining_balance ?? balance - planPrice;
+          expiryIso = rpcData.expires_at ?? null;
+        } else {
+          rawErrorMsg = rpcErr?.message ?? rpcData?.error ?? null;
+        }
       }
 
-      const idempotencyKey = `purchase-${session.user.id}-${selectedPlan}-${Date.now()}`;
-      const { data, error } = await supabase.functions.invoke('purchase-subscription', {
-        body: {
-          planName: targetPlanName,
-          idempotencyKey,
-        },
-      });
+      // 3. Edge Function fallback if RPC direct call didn't succeed
+      if (!purchaseSuccess) {
+        const idempotencyKey = `purchase-${session.user.id}-${selectedPlan}-${Date.now()}`;
+        const { data, error } = await supabase.functions.invoke('purchase-subscription', {
+          body: {
+            planName: targetPlanName,
+            idempotencyKey,
+          },
+        });
 
-      if (error || !data?.success) {
-        let rawErrorMsg = error?.message || data?.error || 'Purchase failed.';
-        if (error && 'context' in error && error.context?.json) {
-          try {
-            const details = await error.context.json();
-            rawErrorMsg = details?.error ?? details?.message ?? rawErrorMsg;
-          } catch { /* Keep SDK error */ }
+        if (!error && data?.success) {
+          purchaseSuccess = true;
+          remainingBal = data?.result?.remaining_balance ?? balance - planPrice;
+          expiryIso = data?.result?.expires_at ?? null;
+        } else {
+          rawErrorMsg = error?.message ?? data?.error ?? rawErrorMsg;
+          if (error && 'context' in error && error.context?.json) {
+            try {
+              const details = await error.context.json();
+              rawErrorMsg = details?.error ?? details?.message ?? rawErrorMsg;
+            } catch { /* Keep SDK error */ }
+          }
         }
+      }
 
-        if (rawErrorMsg.includes('INSUFFICIENT_BALANCE') || data?.code === 'INSUFFICIENT_BALANCE') {
+      if (!purchaseSuccess) {
+        const errStr = String(rawErrorMsg ?? '').toLowerCase();
+        if (errStr.includes('insufficient_balance') || errStr.includes('insufficient') || errStr.includes('balance')) {
           Alert.alert(
             t(language, 'membership'),
             language === 'fr'
-              ? 'Solde du compte insuffisant. Veuillez recharger votre solde.'
+              ? 'Solde du compte insuffisant. Veuillez appuyer sur Recharger le solde pour approvisionner votre compte.'
               : 'Your account balance is insufficient for this plan. Please tap Add Funds to top up.',
             [
               { text: t(language, 'cancel'), style: 'cancel' },
@@ -135,11 +192,10 @@ export default function MembershipScreen() {
             ]
           );
         } else {
-          const classified = classifyAppError(
-            error ?? data?.error ?? data?.message,
-            'subscription'
+          Alert.alert(
+            'Activation Error',
+            rawErrorMsg ?? (language === 'fr' ? 'Impossible d’activer l’abonnement.' : 'Could not activate subscription. Please check your account balance and try again.')
           );
-          setMessage(t(language, classified.messageKey));
         }
         return;
       }
@@ -147,16 +203,24 @@ export default function MembershipScreen() {
       // Authoritative purchase completed
       setIsPremium(true);
       refreshContent();
-      if (data?.result?.remaining_balance !== undefined) {
-        setBalance(data.result.remaining_balance);
+      setBalance(remainingBal);
+
+      if (expiryIso) {
+        setExpiresAtDate(new Date(expiryIso));
+        setExpiresAt(new Date(expiryIso).toLocaleDateString(language === 'fr' ? 'fr-FR' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' }));
       } else {
-        const { data: w } = await supabase.from('wallets').select('balance').eq('user_id', session.user.id).maybeSingle();
-        if (w?.balance !== undefined) setBalance(w.balance);
+        const { data: subData } = await supabase
+          .from('subscriptions')
+          .select('expires_at')
+          .eq('user_id', session.user.id)
+          .maybeSingle();
+
+        if (subData?.expires_at) {
+          setExpiresAtDate(new Date(subData.expires_at));
+          setExpiresAt(new Date(subData.expires_at).toLocaleDateString(language === 'fr' ? 'fr-FR' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' }));
+        }
       }
-      if (data?.result?.expires_at) {
-        setExpiresAtDate(new Date(data.result.expires_at));
-        setExpiresAt(new Date(data.result.expires_at).toLocaleDateString(language === 'fr' ? 'fr-FR' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' }));
-      }
+
       setMessage(language === 'fr' ? 'Abonnement Daily Dew Premium activé avec succès !' : 'Daily Dew Premium membership activated!');
     } catch (err: unknown) {
       const classified = classifyAppError(err, 'subscription');
