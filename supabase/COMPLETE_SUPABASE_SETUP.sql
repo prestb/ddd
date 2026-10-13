@@ -372,7 +372,31 @@ ON public.withdrawal_requests FOR ALL USING (
   )
 );
 
--- 8. Stored RPCs
+-- 8. Stored RPCs (Dynamically drop all legacy overloaded functions first)
+DO $$
+DECLARE
+  r RECORD;
+BEGIN
+  FOR r IN
+    SELECT oid::regprocedure::text AS func_signature
+    FROM pg_proc
+    WHERE proname IN (
+      'purchase_subscription',
+      'debit_wallet',
+      'fulfill_referral_reward',
+      'transfer_referral_to_deposit_wallet',
+      'request_wallet_withdrawal',
+      'admin_process_withdrawal_request',
+      'admin_credit_user_referral_wallet',
+      'admin_delete_user_account',
+      'get_app_setting',
+      'set_app_setting'
+    )
+    AND pronamespace = 'public'::regnamespace
+  LOOP
+    EXECUTE 'DROP FUNCTION IF EXISTS ' || r.func_signature || ' CASCADE';
+  END LOOP;
+END $$;
 CREATE OR REPLACE FUNCTION get_app_setting(p_key TEXT)
 RETURNS TEXT AS $$
 DECLARE
@@ -400,9 +424,6 @@ BEGIN
   RETURN jsonb_build_object('success', true, 'key', p_key, 'value', p_value);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Drop any legacy overloaded versions of debit_wallet & purchase_subscription to eliminate PostgreSQL ambiguity
-DROP FUNCTION IF EXISTS public.debit_wallet CASCADE;
 
 CREATE OR REPLACE FUNCTION public.debit_wallet(
   p_user_id UUID,
@@ -522,9 +543,6 @@ BEGIN
   RETURN jsonb_build_object('status', 'rewarded', 'amount', v_reward_amount, 'percentage', v_percentage);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
-
-DROP FUNCTION IF EXISTS public.purchase_subscription CASCADE;
-DROP FUNCTION IF EXISTS public.debit_wallet CASCADE;
 
 CREATE OR REPLACE FUNCTION public.purchase_subscription(
   p_user_id UUID,
