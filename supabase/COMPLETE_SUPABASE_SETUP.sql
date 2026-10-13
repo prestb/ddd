@@ -101,7 +101,60 @@ UPDATE public.profiles
 SET referral_code = generate_unique_referral_code()
 WHERE referral_code IS NULL OR referral_code = '';
 
--- 3. Referrals Table
+-- 3. Subscription Plans, Subscriptions & Transactions Tables
+CREATE TABLE IF NOT EXISTS public.subscription_plans (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  duration_days INTEGER NOT NULL,
+  price_xaf INTEGER NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO public.subscription_plans (name, duration_days, price_xaf, is_active)
+VALUES
+  ('Monthly', 30, 500, true),
+  ('Annual', 365, 5000, true)
+ON CONFLICT DO NOTHING;
+
+ALTER TABLE public.subscription_plans ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public can read subscription plans" ON public.subscription_plans;
+CREATE POLICY "Public can read subscription plans" ON public.subscription_plans FOR SELECT USING (true);
+
+CREATE TABLE IF NOT EXISTS public.subscriptions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID UNIQUE NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  plan_id UUID REFERENCES public.subscription_plans(id),
+  status TEXT NOT NULL DEFAULT 'active',
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  auto_renew BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.subscriptions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Users can view their own subscription" ON public.subscriptions;
+CREATE POLICY "Users can view their own subscription" ON public.subscriptions FOR SELECT USING (auth.uid() = user_id);
+
+CREATE TABLE IF NOT EXISTS public.subscription_transactions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  subscription_id UUID REFERENCES public.subscriptions(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  plan_id UUID REFERENCES public.subscription_plans(id),
+  type TEXT NOT NULL DEFAULT 'purchase',
+  amount INTEGER NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'XAF',
+  wallet_transaction_id UUID,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.subscription_transactions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Users can view their own subscription transactions" ON public.subscription_transactions;
+CREATE POLICY "Users can view their own subscription transactions" ON public.subscription_transactions FOR SELECT USING (auth.uid() = user_id);
+
+-- 4. Referrals Table
 CREATE TABLE IF NOT EXISTS public.referrals (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   referrer_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
@@ -138,7 +191,7 @@ USING (
   )
 );
 
--- 4. Wallets Table & Columns
+-- 5. Wallets Table & Columns
 CREATE TABLE IF NOT EXISTS public.wallets (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID UNIQUE NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
@@ -169,7 +222,7 @@ ON public.wallets FOR ALL USING (
   )
 );
 
--- 5. Wallet Transactions Table & Type Check Constraint
+-- 6. Wallet Transactions Table & Type Check Constraint
 CREATE TABLE IF NOT EXISTS public.wallet_transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   wallet_id UUID NOT NULL REFERENCES public.wallets(id) ON DELETE CASCADE,
@@ -193,6 +246,7 @@ SET type = 'deposit'
 WHERE type IS NULL OR LOWER(type) NOT IN (
   'deposit',
   'credit',
+  'debit',
   'subscription_payment',
   'donation',
   'refund',
@@ -208,6 +262,7 @@ ADD CONSTRAINT wallet_transactions_type_check
 CHECK (LOWER(type) IN (
   'deposit',
   'credit',
+  'debit',
   'subscription_payment',
   'donation',
   'refund',
@@ -233,7 +288,7 @@ ON public.wallet_transactions FOR ALL USING (
   )
 );
 
--- 6. Withdrawal Requests Table
+-- 7. Withdrawal Requests Table
 CREATE TABLE IF NOT EXISTS public.withdrawal_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
@@ -263,7 +318,7 @@ ON public.withdrawal_requests FOR ALL USING (
   )
 );
 
--- 7. Stored RPCs
+-- 8. Stored RPCs
 CREATE OR REPLACE FUNCTION get_app_setting(p_key TEXT)
 RETURNS TEXT AS $$
 DECLARE
@@ -291,6 +346,173 @@ BEGIN
   RETURN jsonb_build_object('success', true, 'key', p_key, 'value', p_value);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.debit_wallet(
+  p_user_id UUID,
+  p_amount INTEGER,
+  p_reference TEXT DEFAULT NULL,
+  p_description TEXT DEFAULT NULL,
+  p_metadata JSONB DEFAULT '{}'::jsonb
+)
+RETURNS JSONB AS $$
+DECLARE
+  v_wallet_id UUID;
+  v_balance_before INTEGER;
+  v_balance_after INTEGER;
+  v_tx_id UUID;
+BEGIN
+  IF p_amount IS NULL OR p_amount <= 0 THEN
+    RAISE EXCEPTION 'Wallet debit amount must be greater than zero.';
+  END IF;
+
+  SELECT id, balance INTO v_wallet_id, v_balance_before
+  FROM public.wallets
+  WHERE user_id = p_user_id
+  FOR UPDATE;
+
+  IF v_wallet_id IS NULL THEN
+    INSERT INTO public.wallets (user_id, balance, referral_balance) VALUES (p_user_id, 0, 0)
+    RETURNING id, balance INTO v_wallet_id, v_balance_before;
+  END IF;
+
+  v_balance_before := COALESCE(v_balance_before, 0);
+
+  IF v_balance_before < p_amount THEN
+    RAISE EXCEPTION 'INSUFFICIENT_BALANCE: Balance (% XAF) is less than required amount (% XAF).', v_balance_before, p_amount;
+  END IF;
+
+  v_balance_after := v_balance_before - p_amount;
+
+  INSERT INTO public.wallet_transactions (
+    wallet_id, user_id, type, amount, balance_before, balance_after, reference, description, metadata
+  ) VALUES (
+    v_wallet_id, p_user_id, 'debit', p_amount, v_balance_before, v_balance_after,
+    p_reference, COALESCE(p_description, 'Account balance debit'), COALESCE(p_metadata, '{}'::jsonb)
+  ) RETURNING id INTO v_tx_id;
+
+  UPDATE public.wallets SET balance = v_balance_after, updated_at = NOW() WHERE id = v_wallet_id;
+
+  RETURN jsonb_build_object(
+    'wallet_id', v_wallet_id,
+    'transaction_id', v_tx_id,
+    'balance_before', v_balance_before,
+    'balance_after', v_balance_after,
+    'amount', p_amount
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.purchase_subscription(
+  p_user_id UUID,
+  p_plan_id UUID,
+  p_idempotency_key TEXT DEFAULT NULL
+)
+RETURNS JSONB AS $$
+DECLARE
+  v_plan_name TEXT;
+  v_duration_days INTEGER;
+  v_price_xaf INTEGER;
+  v_is_active BOOLEAN;
+  v_wallet_id UUID;
+  v_balance_before INTEGER;
+  v_balance_after INTEGER;
+  v_debit_result JSONB;
+  v_wallet_tx_id UUID;
+  v_subscription_id UUID;
+  v_current_expires_at TIMESTAMPTZ;
+  v_starts_at TIMESTAMPTZ;
+  v_expires_at TIMESTAMPTZ;
+  v_sub_tx_id UUID;
+BEGIN
+  IF p_user_id IS NULL OR p_plan_id IS NULL THEN
+    RAISE EXCEPTION 'User ID and Plan ID are required for subscription purchase.';
+  END IF;
+
+  -- Auto-ensure profile exists
+  INSERT INTO public.profiles (id) VALUES (p_user_id) ON CONFLICT (id) DO NOTHING;
+
+  -- Read plan details
+  SELECT name, duration_days, price_xaf, is_active
+  INTO v_plan_name, v_duration_days, v_price_xaf, v_is_active
+  FROM public.subscription_plans
+  WHERE id = p_plan_id;
+
+  IF v_plan_name IS NULL OR NOT v_is_active THEN
+    RAISE EXCEPTION 'Selected subscription plan is invalid or inactive.';
+  END IF;
+
+  -- Auto-ensure wallet exists
+  SELECT id, balance INTO v_wallet_id, v_balance_before
+  FROM public.wallets WHERE user_id = p_user_id FOR UPDATE;
+
+  IF v_wallet_id IS NULL THEN
+    INSERT INTO public.wallets (user_id, balance, referral_balance) VALUES (p_user_id, 0, 0)
+    RETURNING id, balance INTO v_wallet_id, v_balance_before;
+  END IF;
+
+  v_balance_before := COALESCE(v_balance_before, 0);
+
+  IF v_balance_before < v_price_xaf THEN
+    RAISE EXCEPTION 'INSUFFICIENT_BALANCE: Wallet balance (% XAF) is less than plan price (% XAF).', v_balance_before, v_price_xaf;
+  END IF;
+
+  -- Debit wallet
+  v_debit_result := public.debit_wallet(
+    p_user_id := p_user_id,
+    p_amount := v_price_xaf,
+    p_reference := COALESCE(p_idempotency_key, 'sub-purchase-' || gen_random_uuid()::text),
+    p_description := 'Daily Dew ' || v_plan_name || ' Membership Purchase',
+    p_metadata := jsonb_build_object('plan_id', p_plan_id, 'plan_name', v_plan_name)
+  );
+
+  v_wallet_tx_id := (v_debit_result->>'transaction_id')::uuid;
+  v_balance_after := (v_debit_result->>'balance_after')::integer;
+
+  -- Lock existing subscription
+  SELECT id, expires_at INTO v_subscription_id, v_current_expires_at
+  FROM public.subscriptions WHERE user_id = p_user_id FOR UPDATE;
+
+  v_starts_at := NOW();
+  v_expires_at := GREATEST(COALESCE(v_current_expires_at, NOW()), NOW()) + (v_duration_days || ' days')::interval;
+
+  -- Upsert subscription
+  INSERT INTO public.subscriptions (
+    user_id, plan_id, status, started_at, expires_at, auto_renew, updated_at
+  ) VALUES (
+    p_user_id, p_plan_id, 'active', v_starts_at, v_expires_at, true, NOW()
+  )
+  ON CONFLICT (user_id) DO UPDATE SET
+    plan_id = EXCLUDED.plan_id,
+    status = 'active',
+    started_at = EXCLUDED.started_at,
+    expires_at = EXCLUDED.expires_at,
+    updated_at = NOW()
+  RETURNING id INTO v_subscription_id;
+
+  -- Record transaction
+  INSERT INTO public.subscription_transactions (
+    subscription_id, user_id, plan_id, type, amount, currency, wallet_transaction_id, metadata
+  ) VALUES (
+    v_subscription_id, p_user_id, p_plan_id, 'purchase', v_price_xaf, 'XAF', v_wallet_tx_id,
+    jsonb_build_object('idempotency_key', p_idempotency_key, 'plan_name', v_plan_name)
+  ) RETURNING id INTO v_sub_tx_id;
+
+  RETURN jsonb_build_object(
+    'status', 'successful',
+    'subscription_id', v_subscription_id,
+    'subscription_transaction_id', v_sub_tx_id,
+    'wallet_transaction_id', v_wallet_tx_id,
+    'plan_name', v_plan_name,
+    'price_xaf', v_price_xaf,
+    'started_at', v_starts_at,
+    'expires_at', v_expires_at,
+    'remaining_balance', v_balance_after
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION public.purchase_subscription(UUID, UUID, TEXT) TO service_role, postgres, authenticated;
+GRANT EXECUTE ON FUNCTION public.debit_wallet(UUID, INTEGER, TEXT, TEXT, JSONB) TO service_role, postgres, authenticated;
 
 CREATE OR REPLACE FUNCTION fulfill_referral_reward(p_referred_user_id UUID, p_subscription_price_xaf INTEGER DEFAULT 500)
 RETURNS JSONB AS $$
@@ -607,34 +829,6 @@ BEGIN
   );
 
   RETURN jsonb_build_object('success', true, 'new_referral_balance', v_ref_after, 'amount', p_amount_xaf);
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Stored RPC: Admin Delete User Account (Deletes from auth.users and all related tables)
-CREATE OR REPLACE FUNCTION admin_delete_user_account(p_target_user_id UUID)
-RETURNS JSONB AS $$
-DECLARE
-  v_caller_role TEXT;
-BEGIN
-  SELECT role INTO v_caller_role FROM public.profiles WHERE id = auth.uid();
-  IF v_caller_role <> 'admin' THEN
-    RETURN jsonb_build_object('success', false, 'error', 'Unauthorized. Only Ministry Administrators can delete user accounts.');
-  END IF;
-
-  IF p_target_user_id = auth.uid() THEN
-    RETURN jsonb_build_object('success', false, 'error', 'You cannot delete your own admin account.');
-  END IF;
-
-  DELETE FROM public.wallets WHERE user_id = p_target_user_id;
-  DELETE FROM public.subscriptions WHERE user_id = p_target_user_id;
-  DELETE FROM public.referrals WHERE referrer_id = p_target_user_id OR referred_user_id = p_target_user_id;
-  DELETE FROM public.withdrawal_requests WHERE user_id = p_target_user_id;
-  DELETE FROM public.wallet_transactions WHERE user_id = p_target_user_id;
-  DELETE FROM public.profiles WHERE id = p_target_user_id;
-
-  DELETE FROM auth.users WHERE id = p_target_user_id;
-
-  RETURN jsonb_build_object('success', true, 'deleted_user_id', p_target_user_id);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
