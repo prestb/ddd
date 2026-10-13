@@ -104,12 +104,60 @@ WHERE referral_code IS NULL OR referral_code = '';
 -- 3. Subscription Plans, Subscriptions & Transactions Tables
 CREATE TABLE IF NOT EXISTS public.subscription_plans (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL,
   duration_days INTEGER NOT NULL,
   price_xaf INTEGER NOT NULL,
   is_active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Safely re-link subscriptions referencing duplicate plans before deduplication
+DO $$
+DECLARE
+  v_monthly_id UUID;
+  v_annual_id UUID;
+BEGIN
+  -- Find or insert single canonical Monthly plan
+  SELECT id INTO v_monthly_id FROM public.subscription_plans WHERE ILIKE(name, 'Monthly') ORDER BY created_at DESC LIMIT 1;
+  IF v_monthly_id IS NULL THEN
+    INSERT INTO public.subscription_plans (name, duration_days, price_xaf, is_active)
+    VALUES ('Monthly', 30, 500, true) RETURNING id INTO v_monthly_id;
+  END IF;
+
+  -- Find or insert single canonical Annual plan
+  SELECT id INTO v_annual_id FROM public.subscription_plans WHERE ILIKE(name, 'Annual') ORDER BY created_at DESC LIMIT 1;
+  IF v_annual_id IS NULL THEN
+    INSERT INTO public.subscription_plans (name, duration_days, price_xaf, is_active)
+    VALUES ('Annual', 365, 5000, true) RETURNING id INTO v_annual_id;
+  END IF;
+
+  -- Update any subscriptions pointing to duplicate Monthly/Annual plan IDs
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'subscriptions') THEN
+    UPDATE public.subscriptions SET plan_id = v_monthly_id
+    WHERE plan_id IN (SELECT id FROM public.subscription_plans WHERE ILIKE(name, 'Monthly') AND id <> v_monthly_id);
+
+    UPDATE public.subscriptions SET plan_id = v_annual_id
+    WHERE plan_id IN (SELECT id FROM public.subscription_plans WHERE ILIKE(name, 'Annual') AND id <> v_annual_id);
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'subscription_transactions') THEN
+    UPDATE public.subscription_transactions SET plan_id = v_monthly_id
+    WHERE plan_id IN (SELECT id FROM public.subscription_plans WHERE ILIKE(name, 'Monthly') AND id <> v_monthly_id);
+
+    UPDATE public.subscription_transactions SET plan_id = v_annual_id
+    WHERE plan_id IN (SELECT id FROM public.subscription_plans WHERE ILIKE(name, 'Annual') AND id <> v_annual_id);
+  END IF;
+
+  -- Now safely delete orphaned duplicate plan rows
+  DELETE FROM public.subscription_plans
+  WHERE id NOT IN (v_monthly_id, v_annual_id) AND ILIKE(name, 'Monthly');
+
+  DELETE FROM public.subscription_plans
+  WHERE id NOT IN (v_monthly_id, v_annual_id) AND ILIKE(name, 'Annual');
+END $$;
+
+ALTER TABLE public.subscription_plans
+DROP CONSTRAINT IF EXISTS unique_subscription_plan_name;
 
 ALTER TABLE public.subscription_plans
 ADD CONSTRAINT unique_subscription_plan_name UNIQUE (name);
